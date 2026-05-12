@@ -1,0 +1,33 @@
+# 编译产物（可以忽略）
+build/
+*.elf
+*.hex
+*.bin
+*.map
+*.o
+*.d
+*.crf
+*.lnp
+*.sct
+*.dep
+*.mk
+
+# CubeMX 临时文件
+mx.scratch
+.ioc_configurations/
+
+# IDE 配置
+.vscode/
+.idea/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 保留 .settings
+!.settings
+
+# ❌ 不要忽略 Drivers/ 文件夹！
+# Drivers/
