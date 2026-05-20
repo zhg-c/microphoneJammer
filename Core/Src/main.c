@@ -43,11 +43,16 @@ typedef enum{
 #define MIN_ZCR 2
 #define MAX_ZCR 60
 
-#define LOW_VOLTAGE 11.0f
+#define DMA_BUF_SIZE 240 // (SAMPLE_WINDOW * 2)
+
 //实际测量 VCC：11.99V,代码计算出来：11.298V
 //校准系数 = 6.36 × (11.99 ÷ 11.298) = 6.75
 // 6.36是电阻分压所得
-#define RIAL_VOLTAGE 6.75f  
+// 以11v为判断依据，则 11.0 / (6.75 * 3.3) * 4096 = 2022
+#define PWR_LOW_RAW 2022
+#define PWR_LOW_RAW_SUM 242640 // PWR_LOW_RAW * SAMPLE_WINDOW
+#define PWR_RECOV_SUM 253680 // 11.5V
+#define PWR_LOW_CONFIRM_CNT 80 // DMA_BUF_SIZE / 2个通道 / 8000Hz = 15ms，为66.6Hz，80次约为1.2s
 
 #define FREQ_SIZE 50
 /* USER CODE END PD */
@@ -67,17 +72,18 @@ TIM_HandleTypeDef htim15;
 
 /* USER CODE BEGIN PV */
 _tKey key = PWR_SW;
+uint8_t autoSwOnce = 0;
 uint16_t sysTickCnt = 0;
 uint8_t blinked = 0,blinked2 = 0;
+uint8_t pwrlow = 0,reinit = 0;
 uint8_t openedPwm = 0;
 uint8_t openedMic = 0;
-uint16_t adcBuf[2] = {0};
-uint16_t micBuf[SAMPLE_WINDOW] = {0};
-uint8_t micIndex = 0;
+uint16_t adcBuf[DMA_BUF_SIZE] = {};
 
 float voltage = 0.0f;
 uint8_t lowVoltage = 0;
 
+uint8_t pwmRun = 0;
 const uint16_t freqs[FREQ_SIZE] = {
     24600, 24800, 25000, 25200, 25400, 25200, 25000, 24800, 24600, 24400,
     24300, 24500, 24700, 24900, 25100, 25300, 25500, 25300, 25100, 24900,
@@ -88,6 +94,7 @@ const uint8_t dutys[FREQ_SIZE] = {51, 51, 50, 50, 49, 49, 50, 50, 51, 51, 52, 51
                          50, 50, 49, 48, 49, 49, 50, 51, 51, 52, 51, 51, 50,
                          50, 49, 48, 48, 49, 49, 50, 50, 51, 51, 52, 51, 51,
                          50, 50, 49, 49, 48, 48, 49, 49, 50, 50, 51};   
+uint16_t ccrs[FREQ_SIZE] = {};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -100,7 +107,6 @@ static void MX_TIM3_Init(void);
 static void MX_TIM15_Init(void);
 /* USER CODE BEGIN PFP */
 void keyScan(void);
-float getVoltage(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -143,14 +149,32 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM15_Init();
   /* USER CODE BEGIN 2 */
-  HAL_ADC_Start_DMA(&hadc, (uint32_t*)adcBuf, 2);
+  for(int i = 0; i < FREQ_SIZE; i++) {
+      ccrs[i] = (dutys[i] * ((48000000 / freqs[i]) - 1)) / 100;
+  }
+  HAL_ADC_Start_DMA(&hadc, (uint32_t*)adcBuf, DMA_BUF_SIZE);
   HAL_TIM_Base_Start(&htim1);
   HAL_TIM_Base_Start_IT(&htim15);
   /* USER CODE END 2 */
-
+  
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
+    if(pwrlow){
+      if(!reinit){
+        reinit = 1;
+        HAL_GPIO_WritePin(GPIOB, HIGH_LED_Pin|LOW_LED_Pin|PWR_LOW_LED_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_RESET);
+        autoSwOnce = 0;
+        openedMic = 0;
+        if(pwmRun){
+          HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+          HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
+          HAL_TIM_Base_Stop_IT(&htim3);
+          pwmRun = 0;
+        }
+      }
+    }
     keyScan();
     /* USER CODE END WHILE */
 
@@ -512,6 +536,9 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 void keyScan(void) {
+  if(pwrlow && key != PWR_SW){
+    return;
+  }
   if(HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
     key = HIGH_SW;
   }
@@ -542,9 +569,8 @@ void keyScan(void) {
         }
         break;
       case AUTO_SW:
-        static uint8_t once;
-        if(!once){
-          once = 1;
+        if(!autoSwOnce){
+          autoSwOnce = 1;
           blinked = 0;
           HAL_GPIO_WritePin(PWR_LED_GPIO_Port, PWR_LED_Pin, GPIO_PIN_SET);
           HAL_GPIO_WritePin(LOW_LED_GPIO_Port, LOW_LED_Pin, GPIO_PIN_SET);
@@ -590,29 +616,18 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
   if (hadc->Instance == ADC1) {
-    voltage = getVoltage();
-    if(voltage < LOW_VOLTAGE){
-      blinked2 = 1;
-      return;
-    }else if(voltage > LOW_VOLTAGE + 0.5f){
-      blinked2 = 0;
-    }
-    if(!openedMic){
-      return;
-    }
-    micBuf[micIndex++] = adcBuf[1];
-    if(micIndex < SAMPLE_WINDOW){
-      return;
-    }
-    micIndex = 0;
     static uint8_t lastSide;
-    static uint8_t runed;
     static uint8_t talkCnt;
     static uint8_t winCnt;
     static uint8_t changeWin = 10;
     uint8_t zcrCnt = 0;
-    for(uint16_t i = 0;i < SAMPLE_WINDOW; i++){
-      int16_t diff = micBuf[i] - ADC_BIAS;
+
+    uint32_t voltSum = 0;
+    static uint16_t pwrlowCnt;
+    for(uint16_t i = 0;i < DMA_BUF_SIZE; i += 2){
+      voltSum += adcBuf[i];
+
+      int16_t diff = adcBuf[i + 1] - ADC_BIAS;
       uint16_t absDiff = abs(diff);
       uint8_t side = (diff > 0) ? 1 : 0;
       if(side != lastSide && absDiff > ZCR_DEADBAND) {
@@ -620,24 +635,45 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
         zcrCnt++;
       }
     }
+
+    if(voltSum < PWR_LOW_RAW_SUM + 100000) {
+      if(pwrlowCnt < PWR_LOW_CONFIRM_CNT){
+        pwrlowCnt++;
+      }
+    } else if(voltSum >= PWR_RECOV_SUM) {
+      if(pwrlowCnt){
+        pwrlowCnt--;
+      }
+    }
+    if(pwrlowCnt >= PWR_LOW_CONFIRM_CNT) {
+      pwrlow = 1;
+    } else {
+      pwrlow = 0;
+      reinit = 0;
+    }
+
+    if(pwrlow || !openedMic) {
+      return;
+    }
+
     if(zcrCnt >= MIN_ZCR && zcrCnt <= MAX_ZCR) {
       talkCnt++;
     }
     if(winCnt++ < changeWin) {
       return;
     }
-    if(!runed && talkCnt > 3) {
+    if(!pwmRun && talkCnt > 3) {
       HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
       HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
       HAL_TIM_Base_Start_IT(&htim3);
       changeWin *= 10;
-      runed = 1;
-    } else if(runed && talkCnt < 2) {
+      pwmRun = 1;
+    } else if(pwmRun && talkCnt < 2) {
       HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
       HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
       HAL_TIM_Base_Stop_IT(&htim3);
       changeWin = 10;
-      runed = 0;
+      pwmRun = 0;
     }
     winCnt = 0;
     talkCnt = 0;
@@ -645,40 +681,37 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-  if (htim->Instance == TIM3) {
+  switch ((uint32_t)htim->Instance)
+  {
+  case (uint32_t)TIM3:
     static uint16_t period = 1919;
     static uint16_t pulseWidth = 950;
     static uint8_t cnt = 0;
     static uint8_t idx = 0;
     if (++cnt >= 8) {
       cnt = 0;
-      period = (48000000 / freqs[idx % FREQ_SIZE]) - 1;
-      pulseWidth = (dutys[idx % FREQ_SIZE] * period) / 100;
-      idx++;
+      pulseWidth = ccrs[idx++ % FREQ_SIZE];
     }
     TIM3->ARR = period;
     TIM3->CCR1 = pulseWidth;
     TIM3->CCR2 = pulseWidth;
-  }
-  if(htim->Instance == TIM15) {
+    break;
+  case (uint32_t)TIM15:
     sysTickCnt++;
-    static uint16_t cnt;
-    if(++cnt >= 500){
-      cnt = 0;
-      if(blinked){
+    static uint16_t led_cnt;
+    if(++led_cnt >= 500) {
+      led_cnt = 0;
+      if(pwrlow) {
+        HAL_GPIO_TogglePin(PWR_LOW_LED_GPIO_Port, PWR_LOW_LED_Pin);
+        HAL_GPIO_WritePin(PWR_LED_GPIO_Port, PWR_LED_Pin, HAL_GPIO_ReadPin(PWR_LOW_LED_GPIO_Port, PWR_LOW_LED_Pin) == GPIO_PIN_SET ? GPIO_PIN_RESET : GPIO_PIN_SET);
+      } else if(blinked){
         HAL_GPIO_TogglePin(PWR_LED_GPIO_Port, PWR_LED_Pin);
       }
-      if(blinked2){
-        HAL_GPIO_TogglePin(PWR_LOW_LED_GPIO_Port, PWR_LOW_LED_Pin);
-      }
     }
+    break;
+  default:
+    break;
   }
-}
-
-float getVoltage(void){
-  uint16_t adc = adcBuf[0];
-  float v_adc = (float)adc * 3.3f / 4096.0f;
-  return v_adc * RIAL_VOLTAGE;
 }
 /* USER CODE END 4 */
 
