@@ -49,6 +49,8 @@ extern "C" {
 
 /* USER CODE END EM */
 
+void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
+
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
@@ -79,16 +81,19 @@ void Error_Handler(void);
 #define HIGH_SW_GPIO_Port GPIOF
 #define PWR_SW_Pin GPIO_PIN_7
 #define PWR_SW_GPIO_Port GPIOF
+#define PWR_SW_EXTI_IRQn EXTI4_15_IRQn
 #define VSPK_BST_Pin GPIO_PIN_15
 #define VSPK_BST_GPIO_Port GPIOA
 #define AUTO_SW_Pin GPIO_PIN_3
 #define AUTO_SW_GPIO_Port GPIOB
+#define AUTO_SW_EXTI_IRQn EXTI2_3_IRQn
 #define PWM2_Pin GPIO_PIN_4
 #define PWM2_GPIO_Port GPIOB
 #define PWM1_Pin GPIO_PIN_5
 #define PWM1_GPIO_Port GPIOB
 #define LOW_SW_Pin GPIO_PIN_6
 #define LOW_SW_GPIO_Port GPIOB
+#define LOW_SW_EXTI_IRQn EXTI4_15_IRQn
 
 /* USER CODE BEGIN Private defines */
 
