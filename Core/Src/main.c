@@ -45,14 +45,10 @@ typedef enum{
 
 #define DMA_BUF_SIZE 240 // (SAMPLE_WINDOW * 2)
 
-//实际测量 VCC：11.99V,代码计算出来：11.298V
-//校准系数 = 6.36 × (11.99 ÷ 11.298) = 6.75
-// 6.36是电阻分压所得
-// 以11v为判断依据，则 11.0 / (6.75 * 3.3) * 4096 = 2022
-#define PWR_LOW_RAW 2022
-#define PWR_LOW_RAW_SUM 242640 // PWR_LOW_RAW * SAMPLE_WINDOW
-#define PWR_RECOV_SUM 253680 // 11.5V
-#define PWR_LOW_CONFIRM_CNT 80 // DMA_BUF_SIZE / 2个通道 / 8000Hz = 15ms，为66.6Hz，80次约为1.2s
+// 低于 9v 为不工作电压
+// 9v / (3.3v / 4096) * [(53.6k + 10k) / 10k] ≈ 1756
+#define PWR_LOW_RAW 1756
+#define PWR_LOW_RAW_SUM 210720 // PWR_LOW_RAW * SAMPLE_WINDOW
 
 #define FREQ_SIZE 50
 /* USER CODE END PD */
@@ -74,13 +70,10 @@ TIM_HandleTypeDef htim15;
 _tKey key = PWR_SW;
 uint8_t autoSwOnce = 0;
 uint16_t sysTickCnt = 0;
-uint8_t blinked = 0,blinked2 = 0;
-uint8_t pwrlow = 0,reinit = 0;
+uint8_t blinked = 0;
+uint8_t pwrlow = 0,locked = 0;
 uint8_t openedMic = 0;
 uint16_t adcBuf[DMA_BUF_SIZE] = {};
-
-float voltage = 0.0f;
-uint8_t lowVoltage = 0;
 
 uint8_t pwmRun = 0,pwmStop = 0;
 const uint16_t freqs[FREQ_SIZE] = {
@@ -159,22 +152,18 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
-    if(pwrlow){
-      if(!reinit){
-        reinit = 1;
-        HAL_GPIO_WritePin(GPIOB, HIGH_LED_Pin|LOW_LED_Pin|PWR_LOW_LED_Pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_RESET);
-        autoSwOnce = 0;
-        openedMic = 0;
-        if(pwmRun){
-          HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
-          HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
-          HAL_TIM_Base_Stop_IT(&htim3);
-          pwmRun = 0;
-        }
-      }
-    }
     keyScan();
+    if(pwrlow){
+      pwmStop = 1;
+      if(pwmRun){
+        pwmRun = 0;
+        HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+        HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
+        HAL_TIM_Base_Stop_IT(&htim3);
+      }
+      HAL_Delay(4000);
+      HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -535,9 +524,6 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 void keyScan(void) {
-  if(pwrlow && key != PWR_SW){
-    return;
-  }
   if(HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
     key = HIGH_SW;
   }
@@ -549,9 +535,11 @@ void keyScan(void) {
           if(sysTickCnt >= 1000){
             if(HAL_GPIO_ReadPin(PWR_ON_GPIO_Port, PWR_ON_Pin) == GPIO_PIN_RESET) {
               blinked = 1;
+              locked = 1;
               HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_SET);
             }else{
               blinked = 0;
+              locked = 0;
               HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
               HAL_GPIO_WritePin(GPIOB, HIGH_LED_Pin|LOW_LED_Pin|PWR_LED_Pin|PWR_LOW_LED_Pin, GPIO_PIN_RESET);
               HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_RESET);
@@ -559,7 +547,7 @@ void keyScan(void) {
             break;
           }
         }
-        if(sysTickCnt < 1000 && !pwrlow && HAL_GPIO_ReadPin(PWR_ON_GPIO_Port, PWR_ON_Pin) == GPIO_PIN_SET) {
+        if(sysTickCnt < 1000 && HAL_GPIO_ReadPin(PWR_ON_GPIO_Port, PWR_ON_Pin) == GPIO_PIN_SET) {
           if(pwmStop){
             pwmStop = 0;
             blinked = 0;
@@ -633,7 +621,6 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
     uint8_t zcrCnt = 0;
 
     uint32_t voltSum = 0;
-    static uint16_t pwrlowCnt;
     for(uint16_t i = 0;i < DMA_BUF_SIZE; i += 2){
       voltSum += adcBuf[i];
 
@@ -645,25 +632,12 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
         zcrCnt++;
       }
     }
-
     if(voltSum < PWR_LOW_RAW_SUM) {
-      if(pwrlowCnt < PWR_LOW_CONFIRM_CNT){
-        pwrlowCnt++;
-      }
-    } else if(voltSum >= PWR_RECOV_SUM) {
-      if(pwrlowCnt){
-        pwrlowCnt--;
-      }
-    }
-    if(pwrlowCnt >= PWR_LOW_CONFIRM_CNT) {
       pwrlow = 1;
-    } else {
-      pwrlow = 0;
-      reinit = 0;
-      HAL_GPIO_WritePin(PWR_LOW_LED_GPIO_Port, PWR_LOW_LED_Pin, GPIO_PIN_RESET);
+      return;
     }
 
-    if(pwrlow || pwmStop || !openedMic) {
+    if(pwmStop || !openedMic) {
       return;
     }
 
@@ -712,7 +686,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     static uint16_t led_cnt;
     if(++led_cnt >= 500) {
       led_cnt = 0;
-      if(pwrlow) {
+      if(locked && pwrlow) {
         HAL_GPIO_TogglePin(PWR_LOW_LED_GPIO_Port, PWR_LOW_LED_Pin);
       } else if(blinked){
         HAL_GPIO_TogglePin(PWR_LED_GPIO_Port, PWR_LED_Pin);
