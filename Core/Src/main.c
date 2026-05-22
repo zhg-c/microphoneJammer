@@ -31,7 +31,6 @@ typedef enum{
   AUTO_SW,
   LOW_SW,
   HIGH_SW,
-  KEY_CNT,
 } _tKey;
 /* USER CODE END PTD */
 
@@ -71,7 +70,7 @@ _tKey key = PWR_SW;
 uint8_t autoSwOnce = 0;
 uint16_t sysTickCnt = 0;
 uint8_t blinked = 0;
-uint8_t pwrlow = 0,locked = 0;
+uint8_t pwrlow = 0,pwrOn = 0;
 uint8_t openedMic = 0;
 uint16_t adcBuf[DMA_BUF_SIZE] = {};
 
@@ -152,8 +151,7 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
-    keyScan();
-    if(pwrlow){
+    if(pwrOn && pwrlow){
       pwmStop = 1;
       if(pwmRun){
         pwmRun = 0;
@@ -161,9 +159,9 @@ int main(void)
         HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
         HAL_TIM_Base_Stop_IT(&htim3);
       }
-      HAL_Delay(4000);
-      HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
+      continue;
     }
+    keyScan();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -535,11 +533,10 @@ void keyScan(void) {
           if(sysTickCnt >= 1000){
             if(HAL_GPIO_ReadPin(PWR_ON_GPIO_Port, PWR_ON_Pin) == GPIO_PIN_RESET) {
               blinked = 1;
-              locked = 1;
               HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_SET);
+              pwrOn = 1;
             }else{
               blinked = 0;
-              locked = 0;
               HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
               HAL_GPIO_WritePin(GPIOB, HIGH_LED_Pin|LOW_LED_Pin|PWR_LED_Pin|PWR_LOW_LED_Pin, GPIO_PIN_RESET);
               HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_RESET);
@@ -547,7 +544,7 @@ void keyScan(void) {
             break;
           }
         }
-        if(sysTickCnt < 1000 && HAL_GPIO_ReadPin(PWR_ON_GPIO_Port, PWR_ON_Pin) == GPIO_PIN_SET) {
+        if(sysTickCnt < 1000 && pwrOn) {
           if(pwmStop){
             pwmStop = 0;
             blinked = 0;
@@ -686,9 +683,16 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     static uint16_t led_cnt;
     if(++led_cnt >= 500) {
       led_cnt = 0;
-      if(locked && pwrlow) {
+      if(pwrlow && pwrOn) {
+        static uint8_t off;
+        if(off++ > 8) {
+          off = 0;
+          HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
+        }
         HAL_GPIO_TogglePin(PWR_LOW_LED_GPIO_Port, PWR_LOW_LED_Pin);
-      } else if(blinked){
+        break;
+      } 
+      if(blinked){
         HAL_GPIO_TogglePin(PWR_LED_GPIO_Port, PWR_LED_Pin);
       }
     }
