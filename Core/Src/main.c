@@ -49,6 +49,12 @@ typedef enum{
 #define PWR_LOW_RAW 1756
 #define PWR_LOW_RAW_SUM 210720 // PWR_LOW_RAW * SAMPLE_WINDOW
 
+#define EV1527_SYNC_MIN 6000      // 同步码低电平最小 (us)
+#define EV1527_SYNC_MAX 20000     // 同步码低电平最大 (us)
+#define EV1527_BIT_TOTAL_MIN 800  // 一个位(高+低)最小总时间 (us)
+#define EV1527_BIT_TOTAL_MAX 2500 // 一个位(高+低)最大总时间 (us)
+#define EV1527_FRAME_LEN 24       // 24位数据
+
 #define FREQ_SIZE 50
 /* USER CODE END PD */
 
@@ -63,6 +69,7 @@ DMA_HandleTypeDef hdma_adc;
 
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim14;
 TIM_HandleTypeDef htim15;
 
 /* USER CODE BEGIN PV */
@@ -96,8 +103,11 @@ static void MX_ADC_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM15_Init(void);
+static void MX_TIM14_Init(void);
 /* USER CODE BEGIN PFP */
 void keyScan(void);
+void Safe_PWM_Stop(void);
+void Safe_PWM_Start(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -139,12 +149,14 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM3_Init();
   MX_TIM15_Init();
+  MX_TIM14_Init();
   /* USER CODE BEGIN 2 */
   for(int i = 0; i < FREQ_SIZE; i++) {
       ccrs[i] = (dutys[i] * ((48000000 / freqs[i]) - 1)) / 100;
   }
   HAL_ADC_Start_DMA(&hadc, (uint32_t*)adcBuf, DMA_BUF_SIZE);
   HAL_TIM_Base_Start(&htim1);
+  HAL_TIM_Base_Start_IT(&htim14);
   HAL_TIM_Base_Start_IT(&htim15);
   /* USER CODE END 2 */
 
@@ -155,9 +167,7 @@ int main(void)
       pwmStop = 1;
       if(pwmRun){
         pwmRun = 0;
-        HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
-        HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
-        HAL_TIM_Base_Stop_IT(&htim3);
+        Safe_PWM_Stop();
       }
       continue;
     }
@@ -374,6 +384,37 @@ static void MX_TIM3_Init(void)
 }
 
 /**
+  * @brief TIM14 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM14_Init(void)
+{
+
+  /* USER CODE BEGIN TIM14_Init 0 */
+
+  /* USER CODE END TIM14_Init 0 */
+
+  /* USER CODE BEGIN TIM14_Init 1 */
+
+  /* USER CODE END TIM14_Init 1 */
+  htim14.Instance = TIM14;
+  htim14.Init.Prescaler = 47;
+  htim14.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim14.Init.Period = 999;
+  htim14.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim14.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim14) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM14_Init 2 */
+
+  /* USER CODE END TIM14_Init 2 */
+
+}
+
+/**
   * @brief TIM15 Initialization Function
   * @param None
   * @retval None
@@ -387,14 +428,15 @@ static void MX_TIM15_Init(void)
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_IC_InitTypeDef sConfigIC = {0};
 
   /* USER CODE BEGIN TIM15_Init 1 */
 
   /* USER CODE END TIM15_Init 1 */
   htim15.Instance = TIM15;
-  htim15.Init.Prescaler = 47;
+  htim15.Init.Prescaler = 479;
   htim15.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim15.Init.Period = 999;
+  htim15.Init.Period = 65535;
   htim15.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim15.Init.RepetitionCounter = 0;
   htim15.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -407,9 +449,21 @@ static void MX_TIM15_Init(void)
   {
     Error_Handler();
   }
+  if (HAL_TIM_IC_Init(&htim15) != HAL_OK)
+  {
+    Error_Handler();
+  }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim15, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_BOTHEDGE;
+  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
+  sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
+  sConfigIC.ICFilter = 0;
+  if (HAL_TIM_IC_ConfigChannel(&htim15, &sConfigIC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -548,9 +602,7 @@ void keyScan(void) {
           if(pwmStop){
             pwmStop = 0;
             blinked = 0;
-            HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-            HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-            HAL_TIM_Base_Start_IT(&htim3);
+            Safe_PWM_Start();
             HAL_GPIO_WritePin(PWR_LED_GPIO_Port, PWR_LED_Pin, GPIO_PIN_SET);
             static uint8_t once;
             if(!once){
@@ -560,9 +612,7 @@ void keyScan(void) {
           }else{
             pwmStop = 1;
             blinked = 1;
-            HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
-            HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
-            HAL_TIM_Base_Stop_IT(&htim3);
+            Safe_PWM_Stop();
           }
         }
         break;
@@ -645,15 +695,11 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
       return;
     }
     if(!pwmRun && talkCnt > 3) {
-      HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-      HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-      HAL_TIM_Base_Start_IT(&htim3);
+      Safe_PWM_Start();
       changeWin *= 10;
       pwmRun = 1;
     } else if(pwmRun && talkCnt < 2) {
-      HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
-      HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
-      HAL_TIM_Base_Stop_IT(&htim3);
+      Safe_PWM_Stop();
       changeWin = 10;
       pwmRun = 0;
     }
@@ -678,7 +724,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     TIM3->CCR1 = pulseWidth;
     TIM3->CCR2 = pulseWidth;
     break;
-  case (uint32_t)TIM15:
+  case (uint32_t)TIM14:
     sysTickCnt++;
     static uint16_t led_cnt;
     if(++led_cnt >= 500) {
@@ -697,9 +743,138 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
       }
     }
     break;
+  case (uint32_t)TIM15:
+    static uint32_t last_ic_val = 0;
+    static uint32_t high_t = 0;
+    static uint32_t low_t = 0;
+    static uint8_t decode_state = 0;
+    static uint8_t bit_cnt = 0;
+    static uint32_t temp_buf = 0;
+    static uint32_t rf_final_data = 0;   // 最终确认的24位数据
+    // static uint32_t rf_remote_id = 0;    // 提取的ID
+    static uint8_t rf_remote_key = 0;    // 提取的按键值
+    static uint32_t last_raw_data = 0;   // 用于双帧校验的缓存
+    static uint32_t last_frame_tick = 0; // 用于计算双帧之间的时间间隔
+
+    uint32_t current_ic_val = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2);
+    uint32_t diff = (current_ic_val >= last_ic_val)
+                        ? (current_ic_val - last_ic_val)
+                        : (65535 - last_ic_val + current_ic_val + 1);
+    last_ic_val = current_ic_val;
+
+    diff *= 10;
+
+    // 2. 识别电平（根据刚才结束的那一段）
+    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_3) == GPIO_PIN_RESET) {
+      high_t = diff; // 刚才结束的是高电平
+    } else {
+      low_t = diff; // 刚才结束的是低电平
+
+      // 3. 状态机 - 寻找同步码
+      if (low_t >= EV1527_SYNC_MIN && low_t <= EV1527_SYNC_MAX) {
+        decode_state = 1;
+        bit_cnt = 0;
+        temp_buf = 0;
+        return;
+      }
+
+      // 4. 状态机 - 解码数据位
+      if (decode_state == 1) {
+        uint32_t bit_time = high_t + low_t;
+
+        // 严苛过滤：如果这一位总时长不符合协议，直接判定为杂讯
+        if (bit_time < EV1527_BIT_TOTAL_MIN ||
+            bit_time > EV1527_BIT_TOTAL_MAX) {
+          decode_state = 0;
+          return;
+        }
+
+        // 比例判定逻辑 (1.5倍是兼顾灵敏度和抗噪的最佳值)
+        temp_buf <<= 1;
+        if (high_t > (low_t * 1.5)) {
+          temp_buf |= 1; // 长高短低 = 1
+        }
+        // 反之即为 0 (无需操作)
+
+        bit_cnt++;
+
+        // 5. 帧接收完成
+        if (bit_cnt >= EV1527_FRAME_LEN) {
+          uint32_t current_raw = temp_buf;
+          uint32_t now_tick = HAL_GetTick();
+
+          // --- 核心：动态双帧校验逻辑 ---
+          // 必须满足两个条件：
+          // 1. 两次数据完全一致
+          // 2. 两次数据的时间间隔不能超过 200ms (防止两个不同时间的乱码撞车)
+          if ((current_raw == last_raw_data) &&
+              (now_tick - last_frame_tick < 200)) {
+            rf_final_data = current_raw;
+            // rf_remote_id = rf_final_data >> 4;
+            rf_remote_key = rf_final_data & 0x0F;
+            if (rf_remote_key == 0x02) {
+              if(pwmStop){
+                pwmStop = 0;
+                key = PWR_SW;
+              }
+            } else if (rf_remote_key == 0x04) {
+              if(!openedMic) {
+                openedMic = 1;
+                key = PWR_SW;
+              }
+            }
+          }
+
+          // 更新上一帧参考信息
+          last_raw_data = current_raw;
+          last_frame_tick = now_tick;
+
+          decode_state = 0;
+          bit_cnt = 0;
+        }
+      }
+    }
+    break;
   default:
     break;
   }
+}
+
+/**
+  * @brief 安全关闭 PWM：强制切为 GPIO 低电平，保护硬件
+  */
+void Safe_PWM_Stop(void)
+{
+  // 1. 停止定时器中断和输出
+  HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
+  HAL_TIM_Base_Stop_IT(&htim3);
+
+  // 2. 强行切为普通推挽输出模式
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  GPIO_InitStruct.Pin = GPIO_PIN_4 | GPIO_PIN_5; // 确认为你的实际引脚
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;   // 强制普通推挽
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);        // 确认为你的实际端口
+
+  // 3. 强行拉低，锁定绝对安全状态
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4 | GPIO_PIN_5, GPIO_PIN_RESET);
+}
+
+/**
+  * @brief 安全开启 PWM：利用 MSP 恢复复用模式，再使能定时器
+  */
+void Safe_PWM_Start(void)
+{
+  // 1. 直接调用 CubeMX 自动生成的 MSP 后初始化函数
+  // 它会精准、安全地将 GPIOB4/5 重新配置为 TIM3 的复用 PWM 引脚
+  HAL_TIM_MspPostInit(&htim3);
+
+  // 2. 重新启动硬件 PWM 输出和更新中断
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+  HAL_TIM_Base_Start_IT(&htim3);
 }
 /* USER CODE END 4 */
 
