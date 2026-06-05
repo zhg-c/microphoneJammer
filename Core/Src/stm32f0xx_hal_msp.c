@@ -223,7 +223,7 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
     HAL_GPIO_Init(RF_RX_GPIO_Port, &GPIO_InitStruct);
 
     /* TIM15 interrupt Init */
-    HAL_NVIC_SetPriority(TIM15_IRQn, 1, 0);
+    HAL_NVIC_SetPriority(TIM15_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(TIM15_IRQn);
     /* USER CODE BEGIN TIM15_MspInit 1 */
 
