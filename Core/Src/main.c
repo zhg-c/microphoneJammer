@@ -78,9 +78,11 @@ _tKey key = PWR_SW;
 uint8_t autoSwOnce = 0;
 uint16_t sysTickCnt = 0;
 uint8_t blinked = 0;
-uint8_t pwrlow = 0,pwrOn = 0;
+uint8_t pwrlow = 0,pwrOn = 0;//pwrlow 表示电量低
 uint8_t openedMic = 0;
 uint16_t adcBuf[DMA_BUF_SIZE] = {};
+
+uint8_t g_pair = 0,g_cancelPair = 0,g_paired = 0;
 
 uint8_t pwmRun = 0,pwmStop = 0;
 const uint16_t freqs[FREQ_SIZE] = {
@@ -109,6 +111,7 @@ static void MX_TIM14_Init(void);
 void keyScan(void);
 void stopWork(void);
 void startWork(void);
+uint8_t clearId();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -627,11 +630,33 @@ void keyScan(void) {
         }
         break;
       case LOW_SW:
+        sysTickCnt = 0;
+        while (HAL_GPIO_ReadPin(LOW_SW_GPIO_Port, LOW_SW_Pin) == GPIO_PIN_RESET) {
+          if(sysTickCnt >= 1000){
+            g_cancelPair = 1;
+            g_paired = 0;
+            clearId();
+            break;
+          }
+        }
+        if(g_cancelPair) {
+          break;
+        }
         HAL_GPIO_WritePin(VSPK_BST_GPIO_Port, VSPK_BST_Pin, GPIO_PIN_RESET);
         HAL_GPIO_WritePin(LOW_LED_GPIO_Port, LOW_LED_Pin, GPIO_PIN_SET);
         HAL_GPIO_WritePin(HIGH_LED_GPIO_Port, HIGH_LED_Pin, GPIO_PIN_RESET);
         break;
       case HIGH_SW:
+        sysTickCnt = 0;
+        while (HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
+          if(sysTickCnt >= 1000){
+            g_pair = 1;
+            break;
+          }
+        }
+        if(g_pair) {
+          break;
+        }
         HAL_GPIO_WritePin(VSPK_BST_GPIO_Port, VSPK_BST_Pin, GPIO_PIN_SET);
         HAL_GPIO_WritePin(HIGH_LED_GPIO_Port, HIGH_LED_Pin, GPIO_PIN_SET);
         HAL_GPIO_WritePin(LOW_LED_GPIO_Port, LOW_LED_Pin, GPIO_PIN_RESET);
@@ -742,6 +767,32 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
       if(blinked){
         HAL_GPIO_TogglePin(PWR_LED_GPIO_Port, PWR_LED_Pin);
       }
+      static uint32_t pairTick;
+      if(g_pair) {
+        HAL_GPIO_TogglePin(HIGH_LED_GPIO_Port, HIGH_LED_Pin);
+        static uint8_t bOnce;
+        if(!bOnce){
+          bOnce = 1;
+          pairTick = sysTickCnt;
+        }
+        if(sysTickCnt - pairTick >= 5000){
+          g_pair = 0;
+          bOnce = 0;
+          HAL_GPIO_WritePin(HIGH_LED_GPIO_Port, HIGH_LED_Pin, HAL_GPIO_ReadPin(LOW_LED_GPIO_Port, LOW_LED_Pin) == GPIO_PIN_SET ? GPIO_PIN_RESET : GPIO_PIN_SET);
+        }
+      }else if(g_cancelPair) {
+        HAL_GPIO_TogglePin(LOW_LED_GPIO_Port, LOW_LED_Pin);
+        static uint8_t bOnce;
+        if(!bOnce){
+          bOnce = 1;
+          pairTick = sysTickCnt;
+        }
+        if(sysTickCnt - pairTick >= 2000){
+          g_cancelPair = 0;
+          bOnce = 0;
+          HAL_GPIO_WritePin(LOW_LED_GPIO_Port, LOW_LED_Pin, HAL_GPIO_ReadPin(HIGH_LED_GPIO_Port, HIGH_LED_Pin) == GPIO_PIN_SET ? GPIO_PIN_RESET : GPIO_PIN_SET);
+        } 
+      }
     }
     break;
   default:
@@ -770,18 +821,21 @@ uint8_t saveId(uint32_t id) {
   HAL_FLASH_Lock();
   return status == HAL_OK;
 }
+uint8_t clearId(){
+  return saveId(0xFFFFFFFF);
+}
 uint32_t readId() {
   return *(uint32_t*)PAIR_FLASH_ADDR;
 }
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
   if (htim->Instance == TIM15) {
-    static uint8_t bOnce,bPaired;
+    static uint8_t bOnce;
     static uint32_t remoteId;
     if(!bOnce){
       bOnce  = 1;
       remoteId = readId();
       if(remoteId != 0xFFFFFFFF) {
-        bPaired = 1;
+        g_paired = 1;
       }
     }
     static uint32_t high, low,decodeState, bitCnt, tempBuf, lastCnt;
@@ -811,27 +865,20 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
         bitCnt++;
         if(bitCnt >= EV1527_FRAME_LEN) {
           static uint32_t lastData;
-          static uint32_t lastTick,pairTick,debounceTick;
+          static uint32_t lastTick,debounceTick;
           uint32_t data = tempBuf;
           uint32_t now = HAL_GetTick();
           if(data == lastData && (now - lastTick < 200)) { //两组数据相同且时间小于200ms，认为是有效按键
             uint32_t id = data >> 4;
             uint8_t btn = data & 0x0F;
-            if(btn == 0x0c){
-              if(!pairTick){
-                pairTick = now;
-              }else{
-                if(now - pairTick >= 2000){
-                  if(saveId(id)){
-                    bPaired = 1;
-                    remoteId = id;
-                  }
-                }
-              }
+            
+            if(g_pair){
+              saveId(id);
+              g_paired = 1;
+              remoteId = id;
               return;
             }
-            pairTick = 0;
-            if(bPaired && id != remoteId) {
+            if(g_paired && id != remoteId) {
               return;
             }
             if(!debounceTick){
