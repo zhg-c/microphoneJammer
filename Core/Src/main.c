@@ -91,7 +91,7 @@ uint8_t g_pair = 0,g_cancelPair = 0,g_paired = 0;
 state_t g_state = {0};
 uint32_t g_remoteId = 0;
 
-uint8_t pwmRun = 0,pwmStop = 0;
+uint8_t pwmRun = 0,pwmStop = 1;
 const uint16_t freqs[FREQ_SIZE] = {
     24600, 24800, 25000, 25200, 25400, 25200, 25000, 24800, 24600, 24400,
     24300, 24500, 24700, 24900, 25100, 25300, 25500, 25300, 25100, 24900,
@@ -196,7 +196,7 @@ int main(void)
         bOnce = 1;
         sysTickCnt = 0;
       }
-      if(sysTickCnt >= 1000 * 30 * 1){
+      if(sysTickCnt >= 600000){
         HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
       }
       continue;
@@ -618,11 +618,12 @@ void keyScan(void) {
         while (HAL_GPIO_ReadPin(PWR_SW_GPIO_Port, PWR_SW_Pin) == GPIO_PIN_RESET) {
           if(sysTickCnt >= 1000){
             shortPress = 0;
-            if(HAL_GPIO_ReadPin(PWR_ON_GPIO_Port, PWR_ON_Pin) == GPIO_PIN_RESET) {
+            if(!pwrOn) {
+              pwrOn = 1;
               blinked = 1;
               HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_SET);
-              pwrOn = 1;
             }else{
+              pwrOn = 0;
               blinked = 0;
               HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
               HAL_GPIO_WritePin(GPIOB, HIGH_LED_Pin|LOW_LED_Pin|PWR_LED_Pin|PWR_LOW_LED_Pin, GPIO_PIN_RESET);
@@ -637,26 +638,30 @@ void keyScan(void) {
             blinked = 0;
             startWork();
             HAL_GPIO_WritePin(PWR_LED_GPIO_Port, PWR_LED_Pin, GPIO_PIN_SET);
-            static uint8_t once;
-            if(!once){
-              once = 1;
+            static uint8_t bOnce;
+            if(!bOnce){
+              bOnce = 1;
               HAL_GPIO_WritePin(LOW_LED_GPIO_Port, LOW_LED_Pin, GPIO_PIN_SET);
+            }else{
+              recoverState();
             }
           }else{
             pwmStop = 1;
             blinked = 1;
             stopWork();
+            saveState();
           }
         }
         break;
-      case AUTO_SW:
-        if(!openedMic) {
-          openedMic = 1;
-          HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_SET);
-        }else{
+      case AUTO_SW:{
+        if(openedMic) {
           openedMic = 0;
           HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_RESET);
+        }else{
+          openedMic = 1;
+          HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_SET);
         }
+      }
         break;
       case LOW_SW:
         if(g_pair || g_cancelPair) {
@@ -693,11 +698,10 @@ void keyScan(void) {
         pwrSwitch(0);
         break;
       default:
-        key = 0;
         break;
     }
-    key = 0;
   }
+  key = 0;
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
@@ -740,11 +744,9 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
       pwrlow = 1;
       return;
     }
-
     if(pwmStop || !openedMic) {
       return;
     }
-
     if(zcrCnt >= MIN_ZCR && zcrCnt <= MAX_ZCR) {
       talkCnt++;
     }
@@ -941,7 +943,6 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
 
 void stopWork(void)
 {
-  saveState();
   HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
   HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
   HAL_TIM_Base_Stop_IT(&htim3);
@@ -958,7 +959,6 @@ void stopWork(void)
 
 void startWork(void)
 {
-  recoverState();
   HAL_TIM_MspPostInit(&htim3);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
