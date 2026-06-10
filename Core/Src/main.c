@@ -607,6 +607,10 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 void keyScan(void) {
+  if(g_pair || g_cancelPair) {
+    key = 0;
+    return;
+  }
   if(HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
     key = HIGH_SW;
   }
@@ -664,9 +668,6 @@ void keyScan(void) {
       }
         break;
       case LOW_SW:
-        if(g_pair || g_cancelPair) {
-          break;
-        }
         sysTickCnt = 0;
         while (HAL_GPIO_ReadPin(LOW_SW_GPIO_Port, LOW_SW_Pin) == GPIO_PIN_RESET) {
           if(sysTickCnt >= 1000){
@@ -682,9 +683,6 @@ void keyScan(void) {
         pwrSwitch(1);
         break;
       case HIGH_SW:
-        if(g_pair || g_cancelPair) {
-            break;
-        }
         sysTickCnt = 0;
         while (HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
           if(sysTickCnt >= 1000){
