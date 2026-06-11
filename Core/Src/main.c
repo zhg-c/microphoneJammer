@@ -62,6 +62,8 @@ typedef struct{
 #define PAIR_FLASH_ADDR 0x0800F800 // PAIR 在 Flash 中的地址
 
 #define FREQ_SIZE 50
+
+#define TEST 
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -82,7 +84,7 @@ TIM_HandleTypeDef htim15;
 key_t key = PWR_SW;
 uint8_t autoSwOnce = 0;
 uint16_t sysTickCnt = 0;
-uint8_t blinked = 0;
+uint8_t blinked = 0,lastBlinked = 0;
 uint8_t pwrlow = 0,pwrOn = 0;//pwrlow 表示电量低
 uint8_t openedMic = 0;
 uint16_t adcBuf[DMA_BUF_SIZE] = {};
@@ -191,7 +193,7 @@ int main(void)
       continue;
     }
     static uint8_t bOnce;
-    if(blinked && key != PWR_SW){
+    if(blinked && (key != PWR_SW && key != AUTO_SW)){
       if(!bOnce){
         bOnce = 1;
         sysTickCnt = 0;
@@ -637,6 +639,7 @@ void keyScan(void) {
           }
         }
         if(shortPress && pwrOn) {
+          lastBlinked = 0;
           if(pwmStop){
             pwmStop = 0;
             blinked = 0;
@@ -649,6 +652,7 @@ void keyScan(void) {
             }else{
               recoverState();
             }
+            HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_RESET);
           }else{
             pwmStop = 1;
             blinked = 1;
@@ -658,11 +662,32 @@ void keyScan(void) {
         }
         break;
       case AUTO_SW:{
+        if(blinked) {
+          lastBlinked = 1;
+          pwmStop = 0;
+          pwrOn = 1;
+          blinked = 0;
+          openedMic = 1;
+          recoverState();
+          if(HAL_GPIO_ReadPin(HIGH_LED_GPIO_Port, HIGH_LED_Pin) == HAL_GPIO_ReadPin(LOW_LED_GPIO_Port, LOW_LED_Pin)) {
+            pwrSwitch(1);
+          }
+          HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_SET);
+          HAL_GPIO_WritePin(PWR_LED_GPIO_Port, PWR_LED_Pin, GPIO_PIN_SET);
+          break;
+        }
         if(openedMic) {
           openedMic = 0;
+          if(lastBlinked) {
+            blinked = 1;
+            saveState();
+          }
           HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_RESET);
         }else{
           openedMic = 1;
+          if(lastBlinked){
+            recoverState();
+          }
           HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_SET);
         }
       }
@@ -738,10 +763,12 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
         zcrCnt++;
       }
     }
+    #ifndef TEST
     if(voltSum < PWR_LOW_RAW_SUM) {
       pwrlow = 1;
       return;
     }
+    #endif // !TEST
     if(pwmStop || !openedMic) {
       return;
     }
