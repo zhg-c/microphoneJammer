@@ -198,7 +198,7 @@ int main(void)
         bOnce = 1;
         sysTickCnt = 0;
       }
-      if(sysTickCnt >= 600000){
+      if(sysTickCnt++ >= 600000){
         HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
       }
       continue;
@@ -613,6 +613,12 @@ void keyScan(void) {
     key = 0;
     return;
   }
+  static uint8_t bInit;
+  if(!bInit && pwrOn && (key == PWR_SW || key == AUTO_SW)){
+    bInit = 1;
+    HAL_GPIO_WritePin(LOW_LED_GPIO_Port, LOW_LED_Pin, GPIO_PIN_SET);
+    saveState();
+  }
   if(HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
     key = HIGH_SW;
   }
@@ -627,6 +633,7 @@ void keyScan(void) {
             if(!pwrOn) {
               pwrOn = 1;
               blinked = 1;
+              lastBlinked = 1;
               HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_SET);
             }else{
               pwrOn = 0;
@@ -644,49 +651,37 @@ void keyScan(void) {
             pwmStop = 0;
             blinked = 0;
             startWork();
+            recoverState();
             HAL_GPIO_WritePin(PWR_LED_GPIO_Port, PWR_LED_Pin, GPIO_PIN_SET);
-            static uint8_t bOnce;
-            if(!bOnce){
-              bOnce = 1;
-              HAL_GPIO_WritePin(LOW_LED_GPIO_Port, LOW_LED_Pin, GPIO_PIN_SET);
-            }else{
-              recoverState();
-            }
             HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_RESET);
           }else{
             pwmStop = 1;
             blinked = 1;
+            lastBlinked = 1;
             stopWork();
+            HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin,RESET);
+            openedMic = 0;
             saveState();
           }
         }
         break;
       case AUTO_SW:{
-        if(blinked) {
-          lastBlinked = 1;
-          pwmStop = 0;
-          pwrOn = 1;
-          blinked = 0;
-          openedMic = 1;
-          recoverState();
-          if(HAL_GPIO_ReadPin(HIGH_LED_GPIO_Port, HIGH_LED_Pin) == HAL_GPIO_ReadPin(LOW_LED_GPIO_Port, LOW_LED_Pin)) {
-            pwrSwitch(1);
-          }
-          HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_SET);
-          HAL_GPIO_WritePin(PWR_LED_GPIO_Port, PWR_LED_Pin, GPIO_PIN_SET);
-          break;
-        }
         if(openedMic) {
           openedMic = 0;
-          if(lastBlinked) {
+          if(lastBlinked){
             blinked = 1;
+            pwmStop = 1;
             saveState();
+          }else{
+            HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_RESET);
           }
-          HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_RESET);
         }else{
           openedMic = 1;
           if(lastBlinked){
+            pwmStop = 0;
+            blinked = 0;
             recoverState();
+            HAL_GPIO_WritePin(PWR_LED_GPIO_Port,PWR_LED_Pin,GPIO_PIN_SET);
           }
           HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin, GPIO_PIN_SET);
         }
