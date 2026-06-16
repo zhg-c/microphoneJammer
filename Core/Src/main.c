@@ -81,7 +81,7 @@ TIM_HandleTypeDef htim14;
 TIM_HandleTypeDef htim15;
 
 /* USER CODE BEGIN PV */
-key_t key = PWR_SW;
+key_t g_key = PWR_SW;
 uint8_t autoSwOnce = 0;
 uint32_t sysTickCnt = 0;
 uint8_t blinked = 0,lastBlinked = 0;
@@ -89,7 +89,7 @@ uint8_t pwrlow = 0,pwrOn = 0;//pwrlow 表示电量低
 uint8_t micAuto = 1,micRun = 0;
 uint16_t adcBuf[DMA_BUF_SIZE] = {};
 
-uint8_t g_pair = 0,g_cancelPair = 0,g_paired = 0;
+uint8_t g_pair = 0,g_cancelPair = 0,g_paired = 0,g_bRemote = 0;
 state_t g_state = {0};
 uint32_t g_remoteId = 0;
 
@@ -193,7 +193,7 @@ int main(void)
       continue;
     }
     static uint8_t bOnce;
-    if(blinked && (key != PWR_SW && key != AUTO_SW)){
+    if(blinked && (g_key != PWR_SW && g_key != AUTO_SW)){
       if(!bOnce){
         bOnce = 1;
         sysTickCnt = 0;
@@ -610,9 +610,20 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void keyScan(void) {
   if(g_pair || g_cancelPair) {
-    key = 0;
+    g_key = 0;
     return;
   }
+  key_t key = g_key;
+  g_key = 0;
+  if(!g_bRemote){
+    if (key == AUTO_SW && HAL_GPIO_ReadPin(AUTO_SW_GPIO_Port, AUTO_SW_Pin) == GPIO_PIN_SET) {
+      return;
+    }
+    if (key == LOW_SW && HAL_GPIO_ReadPin(LOW_SW_GPIO_Port, LOW_SW_Pin) == GPIO_PIN_SET) {
+      return;
+    }
+  }
+  g_bRemote = 0;
   if(HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
     key = HIGH_SW;
   }
@@ -715,7 +726,6 @@ void keyScan(void) {
         break;
     }
   }
-  key = 0;
   if(blinked){
     offLeds();
   }
@@ -724,13 +734,13 @@ void keyScan(void) {
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
   switch(GPIO_Pin) {
     case PWR_SW_Pin:
-      key = PWR_SW;
+      g_key = PWR_SW;
       break;
     case AUTO_SW_Pin:
-      key = AUTO_SW;
+      g_key = AUTO_SW;
       break;
     case LOW_SW_Pin:
-      key = LOW_SW;
+      g_key = LOW_SW;
       break;
     default:
       break;
@@ -930,18 +940,21 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
             if(now - debounceTick < 100){
               return;
             }
+            if(btn && ((btn & 0x0f) == btn)){
+              g_bRemote = 1;
+            }
             switch(btn) {
             case 0x01:
-              key = PWR_SW;
+              g_key = PWR_SW;
               break;
             case 0x02:
-              key = AUTO_SW;
+              g_key = AUTO_SW;
               break;
             case 0x04:
-              key = HIGH_SW;
+              g_key = HIGH_SW;
               break;
             case 0x08:
-              key = LOW_SW;
+              g_key = LOW_SW;
               break;
             default:
               break;
