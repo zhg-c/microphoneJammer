@@ -49,10 +49,21 @@ typedef struct{
 
 #define DMA_BUF_SIZE 240 // (SAMPLE_WINDOW * 2)
 
+/*
+由于当前计算与实际测量不同，所以摒弃该计算结果，考虑硬件的原因，在代码中降低到8.6v进行测试
 // 低于 9v 为不工作电压
-// 9v / (3.3v / 4096) * [(53.6k + 10k) / 10k] ≈ 1756
+// 9v / (3.3v / 4096) * [10k / (53.6k + 10k)] ≈ 1756
 #define PWR_LOW_RAW 1756
 #define PWR_LOW_RAW_SUM 210720 // PWR_LOW_RAW * SAMPLE_WINDOW
+*/
+
+// 8.6v / (3.3v / 4096) * [10k / (53.6k + 10k)] ≈ 1669
+//实际值 9v
+#define PWR_LOW_RAW 1678
+#define PWR_LOW_RAW_SUM 201360 // PWR_LOW_RAW * SAMPLE_WINDOW
+// 9.2v / (3.3v / 4096) * [10k / (53.6k + 10k)] ≈ 1795
+//实际值 9.6v
+#define PWR_LOW_RAW_SUM_2 215400 // 上电时检测的电压比低电压高出0.6v，避免临界值上反复横跳
 
 #define EV1527_SYNC_MIN 6000      // 同步码低电平最小 (us)
 #define EV1527_SYNC_MAX 20000     // 同步码低电平最大 (us)
@@ -85,7 +96,7 @@ key_t g_key = PWR_SW;
 uint8_t autoSwOnce = 0;
 uint32_t sysTickCnt = 0;
 uint8_t blinked = 0,lastBlinked = 0;
-uint8_t pwrlow = 0,pwrOn = 0;//pwrlow 表示电量低
+uint8_t pwrlow = 0,pwrlow2 = 0,pwrOn = 0;//pwrlow 表示电量低
 uint8_t micAuto = 1,micRun = 0;
 uint16_t adcBuf[DMA_BUF_SIZE] = {};
 
@@ -122,7 +133,6 @@ void stopWork(void);
 void startWork(void);
 uint8_t clearId();
 uint32_t readId();
-void saveState();
 void recoverState();
 void pwrSwitch(uint8_t bLow);
 void offLeds();
@@ -186,7 +196,18 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
+    if(pwrlow2){
+      pwrlow = 1;
+      continue;
+    }
     if(pwrOn && pwrlow){
+      static uint8_t bOnce;
+      if(!bOnce){
+        bOnce = 1;
+        blinked = 0;
+        offLeds();
+        HAL_GPIO_WritePin(PWR_LED_GPIO_Port,PWR_LED_Pin,GPIO_PIN_RESET);
+      }
       if(pwmRun){
         stopWork();
       }
@@ -637,7 +658,7 @@ void keyScan(void) {
             shortPress = 0;
             if(!pwrOn) {
               pwrOn = 1;
-              blinked = 1;
+              blinked = !pwrlow2;
               g_state.low = GPIO_PIN_SET;
               HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_SET);
             }else{
@@ -650,6 +671,9 @@ void keyScan(void) {
             }
             while(HAL_GPIO_ReadPin(PWR_SW_GPIO_Port, PWR_SW_Pin) == GPIO_PIN_RESET);
           }
+        }
+        if(pwrlow2){
+          break;
         }
         if(shortPress && pwrOn) {
           if(blinked){
@@ -768,6 +792,13 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
       }
     }
     #ifndef TEST
+    static uint8_t bOnce;
+    if(!bOnce){
+      bOnce = 1;
+      if(voltSum < PWR_LOW_RAW_SUM_2){
+        pwrlow2 = 1;
+      }
+    }
     if(voltSum < PWR_LOW_RAW_SUM) {
       pwrlow = 1;
       return;
@@ -783,9 +814,11 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
       return;
     }
     if(!pwmRun && talkCnt > 3) {
+      HAL_GPIO_WritePin(PWR_LOW_LED_GPIO_Port,PWR_LOW_LED_Pin,GPIO_PIN_SET);
       startWork();
       changeWin *= 10;
     } else if(pwmRun && talkCnt < 2) {
+      HAL_GPIO_WritePin(PWR_LOW_LED_GPIO_Port,PWR_LOW_LED_Pin,GPIO_PIN_RESET);
       stopWork();
       changeWin = 10;
     }
