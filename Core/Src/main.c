@@ -114,7 +114,8 @@ const uint16_t freqs[FREQ_SIZE] = {
 const uint8_t dutys[FREQ_SIZE] = {51, 51, 50, 50, 49, 49, 50, 50, 51, 51, 52, 51, 51,
                          50, 50, 49, 48, 49, 49, 50, 51, 51, 52, 51, 51, 50,
                          50, 49, 48, 48, 49, 49, 50, 50, 51, 51, 52, 51, 51,
-                         50, 50, 49, 49, 48, 48, 49, 49, 50, 50, 51};   
+                         50, 50, 49, 49, 48, 48, 49, 49, 50, 50, 51};
+uint16_t arrs[FREQ_SIZE] = {};   
 uint16_t ccrs[FREQ_SIZE] = {};
 /* USER CODE END PV */
 
@@ -181,7 +182,8 @@ int main(void)
   MX_TIM14_Init();
   /* USER CODE BEGIN 2 */
   for(int i = 0; i < FREQ_SIZE; i++) {
-      ccrs[i] = (dutys[i] * ((48000000 / freqs[i]) - 1)) / 100;
+      arrs[i] = (48000000 / freqs[i]) - 1;
+      ccrs[i] = (dutys[i] * arrs[i]) / 100;
   }
   g_remoteId = readId();
   if(g_remoteId != 0xFFFFFFFF){
@@ -837,7 +839,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     static uint8_t idx;
     if (++cnt >= 8) {
       cnt = 0;
-      pulseWidth = ccrs[idx++ % FREQ_SIZE];
+      pulseWidth = ccrs[idx % FREQ_SIZE];
+      period = arrs[idx++ % FREQ_SIZE];
     }
     TIM3->ARR = period;
     TIM3->CCR1 = pulseWidth;
