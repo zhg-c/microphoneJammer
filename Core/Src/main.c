@@ -49,21 +49,11 @@ typedef struct{
 
 #define DMA_BUF_SIZE 240 // (SAMPLE_WINDOW * 2)
 
-/*
-由于当前计算与实际测量不同，所以摒弃该计算结果，考虑硬件的原因，在代码中降低到8.6v进行测试
-// 低于 9v 为不工作电压
-// 9v / (3.3v / 4096) * [10k / (53.6k + 10k)] ≈ 1756
-#define PWR_LOW_RAW 1756
-#define PWR_LOW_RAW_SUM 210720 // PWR_LOW_RAW * SAMPLE_WINDOW
-*/
 
-// 8.6v / (3.3v / 4096) * [10k / (53.6k + 10k)] ≈ 1669
-//实际值 9v
-#define PWR_LOW_RAW 1678
-#define PWR_LOW_RAW_SUM 201360 // PWR_LOW_RAW * SAMPLE_WINDOW
-// 9.2v / (3.3v / 4096) * [10k / (53.6k + 10k)] ≈ 1795
-//实际值 9.6v
-#define PWR_LOW_RAW_SUM_2 215400 // 上电时检测的电压比低电压高出0.6v，避免临界值上反复横跳
+// 9v / (3.28v / 4096) * [10k / (53.6k + 10k)] ≈ 1767
+#define PWR_LOW_RAW 1720  //为了对应电量显示模块的 0%
+#define PWR_LOW_RAW_SUM 206400 // PWR_LOW_RAW * SAMPLE_WINDOW
+#define PWR_LOW_RAW_SUM_2 216400 // PWR_LOW_RAW * SAMPLE_WINDOW + 10000 为了防止反复横跳
 
 #define EV1527_SYNC_MIN 6000      // 同步码低电平最小 (us)
 #define EV1527_SYNC_MAX 20000     // 同步码低电平最大 (us)
