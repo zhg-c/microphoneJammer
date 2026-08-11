@@ -969,16 +969,16 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
             }
             switch(btn) {
             case 0x01:
-              g_key = PWR_SW;
+              g_key = AUTO_SW;
               break;
             case 0x02:
-              g_key = AUTO_SW;
+              g_key = LOW_SW;
               break;
             case 0x04:
               g_key = HIGH_SW;
               break;
             case 0x08:
-              g_key = LOW_SW;
+              g_key = PWR_SW;
               break;
             default:
               break;
