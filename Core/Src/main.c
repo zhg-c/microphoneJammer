@@ -676,6 +676,9 @@ void keyScan(void) {
             blinked = 1;
             micRun = 0;
             stopWork();
+            if(micAuto){
+              g_state.mic = GPIO_PIN_RESET;
+            }
           }
           micAuto = blinked;
         }
