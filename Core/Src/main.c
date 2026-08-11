@@ -670,9 +670,6 @@ void keyScan(void) {
         if(shortPress && pwrOn) {
           if(blinked){
             blinked = 0;
-            if(micAuto){
-              g_state.mic = GPIO_PIN_RESET;
-            }
             onLeds();
             startWork();
           }else{
@@ -806,11 +803,9 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
       return;
     }
     if(!pwmRun && talkCnt > 3) {
-      HAL_GPIO_WritePin(PWR_LOW_LED_GPIO_Port,PWR_LOW_LED_Pin,GPIO_PIN_SET);
       startWork();
       changeWin *= 10;
     } else if(pwmRun && talkCnt < 2) {
-      HAL_GPIO_WritePin(PWR_LOW_LED_GPIO_Port,PWR_LOW_LED_Pin,GPIO_PIN_RESET);
       stopWork();
       changeWin = 10;
     }
