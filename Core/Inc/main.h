@@ -94,6 +94,8 @@ void Error_Handler(void);
 #define LOW_SW_Pin GPIO_PIN_6
 #define LOW_SW_GPIO_Port GPIOB
 #define LOW_SW_EXTI_IRQn EXTI4_15_IRQn
+#define INDICATOR_EN_Pin GPIO_PIN_9
+#define INDICATOR_EN_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 
