@@ -173,7 +173,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   for(int i = 0; i < FREQ_SIZE; i++) {
       arrs[i] = (48000000 / freqs[i]) - 1;
-      ccrs[i] = (dutys[i] * arrs[i]) / 100;
+      ccrs[i] = ((dutys[i] - 10) * arrs[i]) / 100;
   }
   g_remoteId = readId();
   if(g_remoteId != 0xFFFFFFFF){
