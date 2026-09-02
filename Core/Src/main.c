@@ -90,7 +90,7 @@ uint8_t pwrlow = 0,pwrlow2 = 0,pwrOn = 0;//pwrlow 表示电量低
 uint8_t micAuto = 1,micRun = 0;
 uint16_t adcBuf[DMA_BUF_SIZE] = {};
 
-uint8_t g_pair = 0,g_cancelPair = 0,g_paired = 0,g_bRemote = 0;
+uint8_t g_pair = 0,g_cancelPair = 0,g_paired = 0;
 state_t g_state = {0};
 uint32_t g_remoteId = 0;
 
@@ -622,130 +622,165 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+typedef struct {
+  key_t key;
+  void (*shortFn)(void);  
+  void (*longFn)(void);   
+  uint16_t longMs;   
+} keyMap_t;
+
+static void pwrLong(void) {
+  if (!pwrOn) {
+    pwrOn = 1;
+    blinked = !pwrlow2;
+    g_state.low = GPIO_PIN_SET;
+    HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(INDICATOR_EN_GPIO_Port, INDICATOR_EN_Pin, GPIO_PIN_SET);
+  } else {
+    pwrOn = 0;
+    blinked = 0;
+    HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
+    g_state.mic = g_state.high = g_state.low = GPIO_PIN_RESET;
+    offLeds();
+    HAL_GPIO_WritePin(PWR_LED_GPIO_Port, PWR_LED_Pin, GPIO_PIN_RESET);
+  }
+}
+
+static void pwrShort(void) {
+  if (!pwrOn || pwrlow2) return;
+  if (blinked) {
+    blinked = 0;
+    g_state.mic = GPIO_PIN_RESET;
+    onLeds();
+    startWork();
+  } else {
+    blinked = 1;
+    micRun = 0;
+    stopWork();
+  }
+  micAuto = blinked;
+}
+
+static void autoAction(void) {
+  if (micRun) {
+    micRun = 0;
+    blinked = micAuto;
+    if (blinked){
+      stopWork(); 
+    } else {
+      startWork();
+    }
+    g_state.mic = GPIO_PIN_RESET;
+    HAL_GPIO_WritePin(AUTO_LED_GPIO_Port, AUTO_LED_Pin, GPIO_PIN_RESET);
+  } else {
+    micRun = 1;
+    blinked = 0;
+    g_state.mic = GPIO_PIN_SET;
+    if (micAuto) {
+      onLeds();
+    } else {
+      HAL_GPIO_WritePin(AUTO_LED_GPIO_Port, AUTO_LED_Pin, GPIO_PIN_SET);
+    }
+  }
+}
+
+static void lowShort(void) {
+  g_state.low = GPIO_PIN_SET;
+  g_state.high = GPIO_PIN_RESET;
+  pwrSwitch(1);
+}
+
+static void lowLong(void) {
+  g_cancelPair = 1;
+  g_paired = 0;
+  clearId();
+}
+
+static void highShort(void) {
+  g_state.high = GPIO_PIN_SET;
+  g_state.low = GPIO_PIN_RESET;
+  pwrSwitch(0);
+}
+
+static void highLong(void) {
+  g_pair = 1;
+}
+
+const keyMap_t keyTable[] = {
+  {PWR_SW,  pwrShort,  pwrLong,  1000},
+  {AUTO_SW, autoAction, NULL,    0},
+  {LOW_SW,  lowShort,  lowLong,  1000},
+  {HIGH_SW, highShort, highLong, 1000},
+};
+#define KEY_NUM (sizeof(keyTable) / sizeof(keyTable[0]))
+
 void keyScan(void) {
-  if(g_pair || g_cancelPair) {
+  if (g_pair || g_cancelPair) {
     g_key = 0;
     return;
   }
   key_t key = g_key;
   g_key = 0;
-  if(!g_bRemote){
-    if (key == AUTO_SW && HAL_GPIO_ReadPin(AUTO_SW_GPIO_Port, AUTO_SW_Pin) == GPIO_PIN_SET) {
-      return;
-    }
-    if (key == LOW_SW && HAL_GPIO_ReadPin(LOW_SW_GPIO_Port, LOW_SW_Pin) == GPIO_PIN_SET) {
-      return;
-    }
-  }
-  g_bRemote = 0;
-  if(HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
+
+  if (HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
     key = HIGH_SW;
   }
-  if(key) {
-    switch(key) {
+
+  if (key == 0) {
+    return;
+  }
+
+  for (uint8_t i = 0; i < KEY_NUM; i++) {
+    if (keyTable[i].key != key) {
+      continue;
+    }
+
+    if (keyTable[i].longFn != NULL) {
+      sysTickCnt = 0;
+      uint8_t isLong = 0;
+      GPIO_TypeDef *port = NULL;
+      uint16_t pin = 0;
+
+      switch (key)
+      {
       case PWR_SW:
-        sysTickCnt = 0;
-        uint8_t shortPress = 1;
-        while (HAL_GPIO_ReadPin(PWR_SW_GPIO_Port, PWR_SW_Pin) == GPIO_PIN_RESET) {
-          if(sysTickCnt >= 1000){
-            shortPress = 0;
-            if(!pwrOn) {
-              pwrOn = 1;
-              blinked = !pwrlow2;
-              g_state.low = GPIO_PIN_SET;
-              HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_SET);
-              HAL_GPIO_WritePin(INDICATOR_EN_GPIO_Port, INDICATOR_EN_Pin, GPIO_PIN_SET);
-            }else{
-              pwrOn = 0;
-              blinked = 0;
-              HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
-              g_state.mic = g_state.high = g_state.low = GPIO_PIN_RESET;
-              offLeds();
-              HAL_GPIO_WritePin(PWR_LED_GPIO_Port,PWR_LED_Pin,GPIO_PIN_RESET);
-            }
-            while(HAL_GPIO_ReadPin(PWR_SW_GPIO_Port, PWR_SW_Pin) == GPIO_PIN_RESET);
-          }
-        }
-        if(pwrlow2){
-          break;
-        }
-        if(shortPress && pwrOn) {
-          if(blinked){
-            blinked = 0;
-            g_state.mic = GPIO_PIN_RESET;
-            onLeds();
-            startWork();
-          }else{
-            blinked = 1;
-            micRun = 0;
-            stopWork();
-          }
-          micAuto = blinked;
-        }
-        break;
-      case AUTO_SW:{
-        if(micRun){
-          micRun = 0;
-          blinked = micAuto;
-          if(blinked){
-            stopWork();
-          }else{
-            startWork();
-          }
-          g_state.mic = GPIO_PIN_RESET;
-          HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin,GPIO_PIN_RESET);
-        }else{
-          micRun = 1;
-          blinked = 0;
-          g_state.mic = GPIO_PIN_SET;
-          if(micAuto){
-            onLeds();
-          }else{
-            HAL_GPIO_WritePin(AUTO_LED_GPIO_Port,AUTO_LED_Pin,GPIO_PIN_SET);
-          }
-        }
-      }
+        port = PWR_SW_GPIO_Port;  
+        pin = PWR_SW_Pin; 
         break;
       case LOW_SW:
-        sysTickCnt = 0;
-        while (HAL_GPIO_ReadPin(LOW_SW_GPIO_Port, LOW_SW_Pin) == GPIO_PIN_RESET) {
-          if(sysTickCnt >= 1000){
-            g_cancelPair = 1;
-            g_paired = 0;
-            clearId();
-            while (HAL_GPIO_ReadPin(LOW_SW_GPIO_Port, LOW_SW_Pin) == GPIO_PIN_RESET);
-          }
-        }
-        if(g_cancelPair) {
-          break;
-        }
-        g_state.low = GPIO_PIN_SET;
-        g_state.high = GPIO_PIN_RESET;
-        pwrSwitch(1);
+        port = LOW_SW_GPIO_Port;  
+        pin = LOW_SW_Pin; 
         break;
       case HIGH_SW:
-        sysTickCnt = 0;
-        while (HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
-          if(sysTickCnt >= 1000){
-            g_pair = 1;
-            while (HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET);
-          }
-        }
-        if(g_pair) {
-          break;
-        }
-        g_state.high = GPIO_PIN_SET;
-        g_state.low = GPIO_PIN_RESET;
-        pwrSwitch(0);
+        port = HIGH_SW_GPIO_Port;  
+        pin = HIGH_SW_Pin; 
         break;
       default:
         break;
+      }
+
+      while (HAL_GPIO_ReadPin(port, pin) == GPIO_PIN_RESET) {
+        if (sysTickCnt >= keyTable[i].longMs) {
+          keyTable[i].longFn();
+          isLong = 1;
+          while (HAL_GPIO_ReadPin(port, pin) == GPIO_PIN_RESET);
+          break;
+        }
+      }
+      if (isLong) {
+        break;
+      }
     }
+    keyTable[i].shortFn();
+    break;
   }
-  if(blinked){
+  if (blinked) {
     offLeds();
   }
 }
+
+
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
   switch(GPIO_Pin) {
@@ -961,12 +996,10 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
             if(!debounceTick){
               debounceTick = now;
             }
-            if(now - debounceTick < 100){
+            if(now - debounceTick < 300){
               return;
             }
-            if(btn && ((btn & 0x0f) == btn)){
-              g_bRemote = 1;
-            }
+
             switch(btn) {
             case 0x01:
               g_key = AUTO_SW;
