@@ -716,8 +716,7 @@ const keyMap_t keyTable[] = {
 #define KEY_NUM (sizeof(keyTable) / sizeof(keyTable[0]))
 
 void keyScan(void) {
-  if (g_pair || g_cancelPair) {
-    g_key = 0;
+  if (g_pair || g_cancelPair || !g_key) {
     return;
   }
   key_t key = g_key;
@@ -725,10 +724,6 @@ void keyScan(void) {
 
   if (HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
     key = HIGH_SW;
-  }
-
-  if (key == 0) {
-    return;
   }
 
   for (uint8_t i = 0; i < KEY_NUM; i++) {
@@ -779,8 +774,6 @@ void keyScan(void) {
     offLeds();
   }
 }
-
-
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
   switch(GPIO_Pin) {
@@ -996,7 +989,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
             if(!debounceTick){
               debounceTick = now;
             }
-            if(now - debounceTick < 300){
+            if(now - debounceTick < 100){
               return;
             }
 
