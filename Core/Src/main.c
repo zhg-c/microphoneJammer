@@ -941,6 +941,8 @@ uint32_t readId() {
 }
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
   if (htim->Instance == TIM15) {
+    static uint32_t frameBuf[3];
+    static uint8_t frameIdx;
     static uint32_t high, low,decodeState, bitCnt, tempBuf, lastCnt;
     uint32_t currCnt = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2);
     uint32_t diff = currCnt >= lastCnt ? (currCnt - lastCnt) : (65535 - lastCnt + currCnt + 1);
@@ -959,6 +961,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
         uint32_t bitTime = high + low;
         if(bitTime < EV1527_BIT_TOTAL_MIN || bitTime > EV1527_BIT_TOTAL_MAX) {
           decodeState = 0;
+          frameIdx = 0;
           return;
         }
         tempBuf <<= 1;
@@ -967,11 +970,27 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
         }
         bitCnt++;
         if(bitCnt >= EV1527_FRAME_LEN) {
-          static uint32_t lastData;
           static uint32_t lastTick,debounceTick;
-          uint32_t data = tempBuf;
           uint32_t now = HAL_GetTick();
-          if(data == lastData && (now - lastTick < 200)) { //两组数据相同且时间小于200ms，认为是有效按键
+          uint32_t data = 0;
+          frameBuf[frameIdx++] = tempBuf;
+          
+          for(uint8_t i = 0; i < frameIdx; i++){
+            for(uint8_t j = i + 1; j < frameIdx; j++){
+              if(frameBuf[i] == frameBuf[j]){
+                data = frameBuf[i];
+                break;
+              }
+            }
+            if(data){
+              break;
+            }
+          }
+          if(frameIdx >= 3) {
+            frameIdx = 0;
+          }
+          if(data && (now - lastTick < 200)) {
+            frameIdx = 0;
             uint32_t id = data >> 4;
             uint8_t btn = data & 0x0F;
             
@@ -986,13 +1005,10 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
             if(g_paired && id != g_remoteId) {
               return;
             }
-            if(!debounceTick){
-              debounceTick = now;
-            }
             if(now - debounceTick < 100){
               return;
             }
-
+            debounceTick = now;
             switch(btn) {
             case 0x01:
               g_key = AUTO_SW;
@@ -1009,9 +1025,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
             default:
               break;
             }
-            debounceTick = 0;
           }
-          lastData = data;
           lastTick = now;
           decodeState = 0;
           bitCnt = 0;
