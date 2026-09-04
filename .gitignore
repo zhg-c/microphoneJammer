@@ -16,18 +16,14 @@ build/
 mx.scratch
 .ioc_configurations/
 
-# IDE 配置
+# IDE / 编辑器配置
 .vscode/
 .idea/
-!.vscode/extensions.json
-!.vscode/settings.json
+.clangd
+.settings/
 
 # 系统文件
 .DS_Store
 Thumbs.db
 
-# 保留 .settings
-!.settings
-
-# ❌ 不要忽略 Drivers/ 文件夹！
-# Drivers/
+# Drivers/ 必须保留，编译依赖

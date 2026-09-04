@@ -28,12 +28,12 @@
 /* USER CODE BEGIN PTD */
 typedef enum{
   PWR_SW = 1,
-  AUTO_SW,
+  WORK_SW,
   LOW_SW,
   HIGH_SW,
 } key_t;
 typedef struct{
-  GPIO_PinState mic;
+  GPIO_PinState work;
   GPIO_PinState high;
   GPIO_PinState low;
 } state_t;
@@ -41,14 +41,7 @@ typedef struct{
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define ADC_BIAS 2048
 #define SAMPLE_WINDOW 120
-#define ZCR_DEADBAND 60
-#define MIN_ZCR 2
-#define MAX_ZCR 60
-
-#define DMA_BUF_SIZE 240 // (SAMPLE_WINDOW * 2)
-
 
 // 9v / (3.28v / 4096) * [10k / (53.6k + 10k)] ≈ 1767
 #define PWR_LOW_RAW 1720  //为了对应电量显示模块的 0%
@@ -87,8 +80,8 @@ uint8_t autoSwOnce = 0;
 uint32_t sysTickCnt = 0;
 uint8_t blinked = 0,lastBlinked = 0;
 uint8_t pwrlow = 0,pwrlow2 = 0,pwrOn = 0;//pwrlow 表示电量低
-uint8_t micAuto = 1,micRun = 0;
-uint16_t adcBuf[DMA_BUF_SIZE] = {};
+uint8_t bWorked = 0;
+uint16_t adcBuf[SAMPLE_WINDOW] = {};
 
 uint8_t g_pair = 0,g_cancelPair = 0,g_paired = 0;
 state_t g_state = {0};
@@ -179,7 +172,7 @@ int main(void)
   if(g_remoteId != 0xFFFFFFFF){
     g_paired = 1;
   }
-  HAL_ADC_Start_DMA(&hadc, (uint32_t*)adcBuf, DMA_BUF_SIZE);
+  HAL_ADC_Start_DMA(&hadc, (uint32_t*)adcBuf, SAMPLE_WINDOW);
   HAL_TIM_Base_Start(&htim1);
   HAL_TIM_Base_Start_IT(&htim14);
   HAL_TIM_IC_Start_IT(&htim15, TIM_CHANNEL_2);
@@ -206,7 +199,7 @@ int main(void)
       continue;
     }
     static uint8_t bOnce;
-    if(blinked && (g_key != PWR_SW && g_key != AUTO_SW)){
+    if(blinked && (g_key != PWR_SW && g_key != WORK_SW)){
       if(!bOnce){
         bOnce = 1;
         sysTickCnt = 0;
@@ -312,14 +305,6 @@ static void MX_ADC_Init(void)
   sConfig.Channel = ADC_CHANNEL_4;
   sConfig.Rank = ADC_RANK_CHANNEL_NUMBER;
   sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
-  if (HAL_ADC_ConfigChannel(&hadc, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure for the selected ADC regular channel to be converted.
-  */
-  sConfig.Channel = ADC_CHANNEL_7;
   if (HAL_ADC_ConfigChannel(&hadc, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -561,7 +546,7 @@ static void MX_GPIO_Init(void)
                           |INDICATOR_EN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, AUTO_LED_Pin|VSPK_BST_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, WORK_LED_Pin|VSPK_BST_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : PWR_ON_Pin */
   GPIO_InitStruct.Pin = PWR_ON_Pin;
@@ -584,8 +569,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(PWR_LED_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : AUTO_LED_Pin VSPK_BST_Pin */
-  GPIO_InitStruct.Pin = AUTO_LED_Pin|VSPK_BST_Pin;
+  /*Configure GPIO pins : WORK_LED_Pin VSPK_BST_Pin */
+  GPIO_InitStruct.Pin = WORK_LED_Pin|VSPK_BST_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -603,8 +588,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(PWR_SW_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : AUTO_SW_Pin LOW_SW_Pin */
-  GPIO_InitStruct.Pin = AUTO_SW_Pin|LOW_SW_Pin;
+  /*Configure GPIO pins : WORK_SW_Pin LOW_SW_Pin */
+  GPIO_InitStruct.Pin = WORK_SW_Pin|LOW_SW_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -641,47 +626,24 @@ static void pwrLong(void) {
     pwrOn = 0;
     blinked = 0;
     HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
-    g_state.mic = g_state.high = g_state.low = GPIO_PIN_RESET;
+    g_state.work = g_state.high = g_state.low = GPIO_PIN_RESET;
     offLeds();
     HAL_GPIO_WritePin(PWR_LED_GPIO_Port, PWR_LED_Pin, GPIO_PIN_RESET);
   }
 }
 
-static void pwrShort(void) {
+static void workShort(void) {
   if (!pwrOn || pwrlow2) return;
   if (blinked) {
     blinked = 0;
-    g_state.mic = GPIO_PIN_RESET;
+    g_state.work = GPIO_PIN_SET;
     onLeds();
     startWork();
   } else {
     blinked = 1;
-    micRun = 0;
+    g_state.work = GPIO_PIN_RESET;
+    offLeds();
     stopWork();
-  }
-  micAuto = blinked;
-}
-
-static void autoAction(void) {
-  if (micRun) {
-    micRun = 0;
-    blinked = micAuto;
-    if (blinked){
-      stopWork(); 
-    } else {
-      startWork();
-    }
-    g_state.mic = GPIO_PIN_RESET;
-    HAL_GPIO_WritePin(AUTO_LED_GPIO_Port, AUTO_LED_Pin, GPIO_PIN_RESET);
-  } else {
-    micRun = 1;
-    blinked = 0;
-    g_state.mic = GPIO_PIN_SET;
-    if (micAuto) {
-      onLeds();
-    } else {
-      HAL_GPIO_WritePin(AUTO_LED_GPIO_Port, AUTO_LED_Pin, GPIO_PIN_SET);
-    }
   }
 }
 
@@ -708,23 +670,23 @@ static void highLong(void) {
 }
 
 const keyMap_t keyTable[] = {
-  {PWR_SW,  pwrShort,  pwrLong,  1000},
-  {AUTO_SW, autoAction, NULL,    0},
+  {PWR_SW,  NULL,  pwrLong,  1000},
+  {WORK_SW, workShort, NULL,    0},
   {LOW_SW,  lowShort,  lowLong,  1000},
   {HIGH_SW, highShort, highLong, 1000},
 };
 #define KEY_NUM (sizeof(keyTable) / sizeof(keyTable[0]))
 
 void keyScan(void) {
+  if (HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
+    g_key = HIGH_SW;
+  }
   if (g_pair || g_cancelPair || !g_key) {
+    g_key = 0;
     return;
   }
   key_t key = g_key;
   g_key = 0;
-
-  if (HAL_GPIO_ReadPin(HIGH_SW_GPIO_Port, HIGH_SW_Pin) == GPIO_PIN_RESET) {
-    key = HIGH_SW;
-  }
 
   for (uint8_t i = 0; i < KEY_NUM; i++) {
     if (keyTable[i].key != key) {
@@ -767,11 +729,10 @@ void keyScan(void) {
         break;
       }
     }
-    keyTable[i].shortFn();
+    if (keyTable[i].shortFn != NULL) {
+      keyTable[i].shortFn();
+    }
     break;
-  }
-  if (blinked) {
-    offLeds();
   }
 }
 
@@ -780,8 +741,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     case PWR_SW_Pin:
       g_key = PWR_SW;
       break;
-    case AUTO_SW_Pin:
-      g_key = AUTO_SW;
+    case WORK_SW_Pin:
+      g_key = WORK_SW;
       break;
     case LOW_SW_Pin:
       g_key = LOW_SW;
@@ -793,23 +754,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
   if (hadc->Instance == ADC1) {
-    static uint8_t lastSide;
-    static uint8_t talkCnt;
-    static uint8_t winCnt;
-    static uint8_t changeWin = 10;//可通过调整窗口大小，实现延时关闭pwm
-    uint8_t zcrCnt = 0;
-
     uint32_t voltSum = 0;
-    for(uint16_t i = 0;i < DMA_BUF_SIZE; i += 2){
+    for(uint16_t i = 0;i < SAMPLE_WINDOW; i++){
       voltSum += adcBuf[i];
-
-      int16_t diff = adcBuf[i + 1] - ADC_BIAS;
-      uint16_t absDiff = abs(diff);
-      uint8_t side = (diff > 0) ? 1 : 0;
-      if(side != lastSide && absDiff > ZCR_DEADBAND) {
-        lastSide = side;
-        zcrCnt++;
-      }
     }
     #ifndef TEST
     static uint8_t bOnce;
@@ -824,24 +771,6 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
       return;
     }
     #endif // !TEST
-    if(!micRun) {
-      return;
-    }
-    if(zcrCnt >= MIN_ZCR && zcrCnt <= MAX_ZCR) {
-      talkCnt++;
-    }
-    if(winCnt++ < changeWin) {
-      return;
-    }
-    if(!pwmRun && talkCnt > 3) {
-      startWork();
-      changeWin *= 10;
-    } else if(pwmRun && talkCnt < 2) {
-      stopWork();
-      changeWin = 10;
-    }
-    winCnt = 0;
-    talkCnt = 0;
   }
 }
 
@@ -1011,16 +940,13 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
             debounceTick = now;
             switch(btn) {
             case 0x01:
-              g_key = AUTO_SW;
+              g_key = WORK_SW;
               break;
             case 0x02:
               g_key = LOW_SW;
               break;
             case 0x04:
               g_key = HIGH_SW;
-              break;
-            case 0x08:
-              g_key = PWR_SW;
               break;
             default:
               break;
@@ -1074,14 +1000,15 @@ void pwrSwitch(uint8_t bLow){
 }
 
 void offLeds(){
-  HAL_GPIO_WritePin(AUTO_LED_GPIO_Port, AUTO_LED_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(PWR_LED_GPIO_Port,PWR_LED_Pin,GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(WORK_LED_GPIO_Port, WORK_LED_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(HIGH_LED_GPIO_Port, HIGH_LED_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(LOW_LED_GPIO_Port, LOW_LED_Pin, GPIO_PIN_RESET);
 }
 
 void onLeds(){
   HAL_GPIO_WritePin(PWR_LED_GPIO_Port,PWR_LED_Pin,GPIO_PIN_SET);
-  HAL_GPIO_WritePin(AUTO_LED_GPIO_Port, AUTO_LED_Pin, g_state.mic);
+  HAL_GPIO_WritePin(WORK_LED_GPIO_Port, WORK_LED_Pin, g_state.work);
   HAL_GPIO_WritePin(HIGH_LED_GPIO_Port, HIGH_LED_Pin, g_state.high);
   HAL_GPIO_WritePin(LOW_LED_GPIO_Port, LOW_LED_Pin, g_state.low);
 }
