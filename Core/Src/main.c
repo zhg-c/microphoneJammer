@@ -70,7 +70,6 @@ ADC_HandleTypeDef hadc;
 DMA_HandleTypeDef hdma_adc;
 
 TIM_HandleTypeDef htim1;
-TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim14;
 TIM_HandleTypeDef htim15;
 
@@ -108,7 +107,6 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_ADC_Init(void);
 static void MX_TIM1_Init(void);
-static void MX_TIM3_Init(void);
 static void MX_TIM15_Init(void);
 static void MX_TIM14_Init(void);
 /* USER CODE BEGIN PFP */
@@ -160,20 +158,18 @@ int main(void)
   MX_DMA_Init();
   MX_ADC_Init();
   MX_TIM1_Init();
-  MX_TIM3_Init();
   MX_TIM15_Init();
   MX_TIM14_Init();
   /* USER CODE BEGIN 2 */
   for(int i = 0; i < FREQ_SIZE; i++) {
-      arrs[i] = (48000000 / freqs[i]) - 1;
-      ccrs[i] = ((dutys[i] - 10) * arrs[i]) / 100;
+      arrs[i] = 48000000 / (freqs[i]) - 1;
+      ccrs[i] = ((dutys[i]) * arrs[i]) / 100;
   }
   g_remoteId = readId();
   if(g_remoteId != 0xFFFFFFFF){
     g_paired = 1;
   }
   HAL_ADC_Start_DMA(&hadc, (uint32_t*)adcBuf, SAMPLE_WINDOW);
-  HAL_TIM_Base_Start(&htim1);
   HAL_TIM_Base_Start_IT(&htim14);
   HAL_TIM_IC_Start_IT(&htim15, TIM_CHANNEL_2);
   /* USER CODE END 2 */
@@ -329,14 +325,16 @@ static void MX_TIM1_Init(void)
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
 
   /* USER CODE BEGIN TIM1_Init 1 */
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 47;
+  htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 124;
+  htim1.Init.Period = 1453;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -349,68 +347,42 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
+  if (HAL_TIM_PWM_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 726;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_LOW;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+  if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
+  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
+  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+  sBreakDeadTimeConfig.DeadTime = 0;
+  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_ENABLE;
+  if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE BEGIN TIM1_Init 2 */
 
   /* USER CODE END TIM1_Init 2 */
-
-}
-
-/**
-  * @brief TIM3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM3_Init(void)
-{
-
-  /* USER CODE BEGIN TIM3_Init 0 */
-
-  /* USER CODE END TIM3_Init 0 */
-
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
-
-  /* USER CODE BEGIN TIM3_Init 1 */
-
-  /* USER CODE END TIM3_Init 1 */
-  htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 0;
-  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 1919;
-  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 960;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM3_Init 2 */
-
-  /* USER CODE END TIM3_Init 2 */
-  HAL_TIM_MspPostInit(&htim3);
+  HAL_TIM_MspPostInit(&htim1);
 
 }
 
@@ -542,11 +514,11 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, HIGH_LED_Pin|PWR_LOW_LED_Pin|PWR_LED_Pin|LOW_LED_Pin
-                          |INDICATOR_EN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, WORK_LED_Pin|HIGH_LED_Pin|PWR_LOW_LED_Pin|PWR_LED_Pin
+                          |LOW_LED_Pin|INDICATOR_EN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, WORK_LED_Pin|VSPK_BST_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(VSPK_BST_GPIO_Port, VSPK_BST_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : PWR_ON_Pin */
   GPIO_InitStruct.Pin = PWR_ON_Pin;
@@ -555,8 +527,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(PWR_ON_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : HIGH_LED_Pin PWR_LOW_LED_Pin LOW_LED_Pin INDICATOR_EN_Pin */
-  GPIO_InitStruct.Pin = HIGH_LED_Pin|PWR_LOW_LED_Pin|LOW_LED_Pin|INDICATOR_EN_Pin;
+  /*Configure GPIO pins : WORK_LED_Pin HIGH_LED_Pin PWR_LOW_LED_Pin LOW_LED_Pin
+                           INDICATOR_EN_Pin */
+  GPIO_InitStruct.Pin = WORK_LED_Pin|HIGH_LED_Pin|PWR_LOW_LED_Pin|LOW_LED_Pin
+                          |INDICATOR_EN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -569,13 +543,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(PWR_LED_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : WORK_LED_Pin VSPK_BST_Pin */
-  GPIO_InitStruct.Pin = WORK_LED_Pin|VSPK_BST_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
   /*Configure GPIO pin : HIGH_SW_Pin */
   GPIO_InitStruct.Pin = HIGH_SW_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -587,6 +554,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(PWR_SW_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : VSPK_BST_Pin */
+  GPIO_InitStruct.Pin = VSPK_BST_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(VSPK_BST_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : WORK_SW_Pin LOW_SW_Pin */
   GPIO_InitStruct.Pin = WORK_SW_Pin|LOW_SW_Pin;
@@ -777,19 +751,25 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
   switch ((uint32_t)htim->Instance)
   {
-  case (uint32_t)TIM3:
+  case (uint32_t)TIM1:
     static uint16_t period = 1919;
     static uint16_t pulseWidth = 950;
     static uint8_t cnt;
     static uint8_t idx;
+    static uint8_t bOnce;
+    if(!bOnce){
+      bOnce = 1;
+      htim1.Instance->CCER |= TIM_CCER_CC1NP;
+      htim1.Instance->CCER |= TIM_CCER_CC1P;
+    }
     if (++cnt >= 8) {
       cnt = 0;
       pulseWidth = ccrs[idx % FREQ_SIZE];
       period = arrs[idx++ % FREQ_SIZE];
     }
-    TIM3->ARR = period;
-    TIM3->CCR1 = pulseWidth;
-    TIM3->CCR2 = pulseWidth;
+    TIM1->ARR = period;
+    TIM1->CCR1 = pulseWidth;
+
     break;
   case (uint32_t)TIM14:
     sysTickCnt++;
@@ -963,29 +943,74 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
 
 void stopWork(void)
 {
-  HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
-  HAL_TIM_Base_Stop_IT(&htim3);
+  // 1. 先关闭定时器更新中断，不再进回调修改ARR/CCR
+  HAL_TIM_Base_Stop_IT(&htim1);
 
+  // 2. 停止PWM主通道、互补通道输出
+  HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
+  HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_1);
+
+  // ====== 关键：强制TIM1的CH1 / CH1N输出低电平（高级定时器MOE位）======
+  __HAL_TIM_MOE_DISABLE(&htim1); // 主输出使能关闭！！高级定时器最核心保护，直接锁死两路PWM输出
+  htim1.Instance->CCR1 = 0;     // 清零比较寄存器，防止重启瞬间残留占空比
+
+  pwmRun = 0;
+
+  // ====== 把PA8、PB13切换为普通GPIO推挽输出，固定拉低，彻底锁死MOS管栅极 ======
+  GPIO_InitTypeDef gpio_low = {0};
+  // PWM1 (PA8)
+  gpio_low.Pin = PWM1_Pin;
+  gpio_low.Mode = GPIO_MODE_OUTPUT_PP;
+  gpio_low.Pull = GPIO_NOPULL;
+  gpio_low.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(PWM1_GPIO_Port, &gpio_low);
+  HAL_GPIO_WritePin(PWM1_GPIO_Port, PWM1_Pin, GPIO_PIN_RESET);
+
+  // PWM2 (PB13)
+  gpio_low.Pin = PWM2_Pin;
+  gpio_low.Mode = GPIO_MODE_OUTPUT_PP;
+  gpio_low.Pull = GPIO_NOPULL;
+  gpio_low.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(PWM2_GPIO_Port, &gpio_low);
+  HAL_GPIO_WritePin(PWM2_GPIO_Port, PWM2_Pin, GPIO_PIN_RESET);
+}
+
+void pwmGpioReInit(void)
+{
   GPIO_InitTypeDef pwmInit = {0};
-  pwmInit.Pin = PWM1_Pin | PWM2_Pin;
-  pwmInit.Mode = GPIO_MODE_OUTPUT_PP;
+  // PA8 TIM1_CH1
+  pwmInit.Pin = PWM1_Pin;
+  pwmInit.Mode = GPIO_MODE_AF_PP;
   pwmInit.Pull = GPIO_NOPULL;
   pwmInit.Speed = GPIO_SPEED_FREQ_HIGH;
+  pwmInit.Alternate = GPIO_AF2_TIM1;
   HAL_GPIO_Init(PWM1_GPIO_Port, &pwmInit);
 
-  HAL_GPIO_WritePin(PWM1_GPIO_Port, PWM1_Pin | PWM2_Pin, GPIO_PIN_RESET);
-  pwmRun = 0;
+  // PB13 TIM1_CH1N
+  pwmInit.Pin = PWM2_Pin;
+  pwmInit.Mode = GPIO_MODE_AF_PP;
+  pwmInit.Pull = GPIO_NOPULL;
+  pwmInit.Speed = GPIO_SPEED_FREQ_HIGH;
+  pwmInit.Alternate = GPIO_AF2_TIM1;
+  HAL_GPIO_Init(PWM2_GPIO_Port, &pwmInit);
 }
 
 void startWork(void)
 {
-  HAL_TIM_MspPostInit(&htim3);
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-  HAL_TIM_Base_Start_IT(&htim3);
+  // 切回定时器复用功能
+  pwmGpioReInit();
+  // 开启PWM与互补PWM
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1);
+
+  // 高级定时器：打开主输出使能MOE，PWM才能真正输出
+  __HAL_TIM_MOE_ENABLE(&htim1);
+
+  // 开启更新中断，开始扫频
+  HAL_TIM_Base_Start_IT(&htim1);
   pwmRun = 1;
 }
+
 
 void pwrSwitch(uint8_t bLow){
   if(bLow){
