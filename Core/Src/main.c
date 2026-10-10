@@ -31,6 +31,8 @@ typedef enum{
   WORK_SW,
   LOW_SW,
   HIGH_SW,
+  START_SW,
+  STOP_SW
 } key_t;
 typedef struct{
   GPIO_PinState work;
@@ -166,7 +168,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   for(int i = 0; i < FREQ_SIZE; i++) {
       arrs[i] = (48000000 / freqs[i]) - 1;
-      ccrs[i] = ((dutys[i] - 10) * arrs[i]) / 100;
+      ccrs[i] = ((dutys[i]) * arrs[i]) / 100; //降低占空比会影响角度干扰效果
   }
   g_remoteId = readId();
   if(g_remoteId != 0xFFFFFFFF){
@@ -199,7 +201,7 @@ int main(void)
       continue;
     }
     static uint8_t bOnce;
-    if(blinked && (g_key != PWR_SW && g_key != WORK_SW)){
+    if(blinked && (g_key != PWR_SW && g_key != WORK_SW && g_key != START_SW && g_key != STOP_SW)){
       if(!bOnce){
         bOnce = 1;
         sysTickCnt = 0;
@@ -633,7 +635,9 @@ static void pwrLong(void) {
 }
 
 static void workShort(void) {
-  if (!pwrOn || pwrlow2) return;
+  if (!pwrOn || pwrlow2) {
+    return;
+  }
   if (blinked) {
     blinked = 0;
     g_state.work = GPIO_PIN_SET;
@@ -687,7 +691,27 @@ void keyScan(void) {
   }
   key_t key = g_key;
   g_key = 0;
-
+  if(key == START_SW || key == STOP_SW){
+    if(!pwrOn || pwrlow2) {
+      return;
+    }
+    if(key == START_SW){
+      if (blinked) {
+        blinked = 0;
+        g_state.work = GPIO_PIN_SET;
+        onLeds();
+        startWork();
+      }
+    } else if(key == STOP_SW){
+      if(!blinked) {
+        blinked = 1;
+        g_state.work = GPIO_PIN_RESET;
+        offLeds();
+        stopWork();
+      }
+    }
+    return;
+  }
   for (uint8_t i = 0; i < KEY_NUM; i++) {
     if (keyTable[i].key != key) {
       continue;
@@ -940,13 +964,16 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
             debounceTick = now;
             switch(btn) {
             case 0x01:
-              g_key = WORK_SW;
+              g_key = START_SW;
               break;
             case 0x02:
               g_key = LOW_SW;
               break;
             case 0x04:
               g_key = HIGH_SW;
+              break;
+            case 0x08:
+              g_key = STOP_SW;
               break;
             default:
               break;
