@@ -65,6 +65,8 @@ void Error_Handler(void);
 #define RF_RX_GPIO_Port GPIOA
 #define VCC_ADC_Pin GPIO_PIN_4
 #define VCC_ADC_GPIO_Port GPIOA
+#define PWM1_Pin GPIO_PIN_6
+#define PWM1_GPIO_Port GPIOA
 #define HIGH_LED_Pin GPIO_PIN_12
 #define HIGH_LED_GPIO_Port GPIOB
 #define PWR_LOW_LED_Pin GPIO_PIN_13
@@ -87,8 +89,6 @@ void Error_Handler(void);
 #define WORK_SW_EXTI_IRQn EXTI2_3_IRQn
 #define PWM2_Pin GPIO_PIN_4
 #define PWM2_GPIO_Port GPIOB
-#define PWM1_Pin GPIO_PIN_5
-#define PWM1_GPIO_Port GPIOB
 #define LOW_SW_Pin GPIO_PIN_6
 #define LOW_SW_GPIO_Port GPIOB
 #define LOW_SW_EXTI_IRQn EXTI4_15_IRQn

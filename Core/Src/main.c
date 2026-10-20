@@ -22,6 +22,73 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+#define Fc          33000U    // 中心频率 33kHz
+#define MAX_DF      500     // 拍频最大 1000Hz
+#define FRAME_SZ    50U       // 帧长度50点
+#define STEP_MIN    20     // 最小步长
+#define STEP_MAX    26      // 最大步长
+
+static uint16_t PN_seed = 0xA5A5;
+
+// LFSR 16bit伪随机序列
+static uint16_t LFSR_Next(uint16_t *seed)
+{
+    uint16_t bit = (*seed ^ (*seed >> 1) ^ (*seed >> 3) ^ (*seed >> 12)) & 1U;
+    *seed = (*seed >> 1) | (bit << 15);
+    return *seed;
+}
+
+/**
+ * @brief 三角啁啾，随机步长100~200Hz，生成对称双载波数组
+ * @param bufA 输出通道1频率数组
+ * @param bufB 输出通道2频率数组
+ */
+uint8_t dutys[FRAME_SZ] = {};
+void GenTriChirp_RandomStep(uint16_t bufA[FRAME_SZ], uint16_t bufB[FRAME_SZ])
+{
+    uint8_t i;
+    int16_t df = 0;
+    bool dir_up = true; // true=拍频上升；false=拍频下降
+    // 获取随机步长：100 ~ 200
+    uint16_t rnd_val = LFSR_Next(&PN_seed);
+    uint16_t step = STEP_MIN + (rnd_val % (STEP_MAX - STEP_MIN + 1));
+
+    for(i = 0; i < FRAME_SZ; i++)
+    {
+        // if (rnd_val & 0x0008) {
+        //     step += (rnd_val & 0x0003); // 附加微调
+        // }
+
+        if(dir_up)
+        {
+            df += step;
+            if(df >= MAX_DF)
+            {
+                df = MAX_DF;
+                dir_up = false; // 超过上限，切换为下降
+            }
+        }
+        else
+        {
+            df -= step;
+            if(df <= 0)
+            {
+                df = 0;
+                dir_up = true; // 低于下限，切换为上升
+            }
+        }
+
+        // 对称生成两路载波，中心33000
+        bufA[i] = Fc - (df / 2U);
+        bufB[i] = Fc + (df / 2U);
+        dutys[i] = 45 + (LFSR_Next(&PN_seed) % 20);
+    }
+}
+
+bool bfull = false;
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,9 +124,8 @@ typedef struct{
 #define EV1527_FRAME_LEN 24       // 24位数据
 #define PAIR_FLASH_ADDR 0x0800F800 // PAIR 在 Flash 中的地址
 
-#define FREQ_SIZE 50
 
-// #define TEST 
+#define TEST 
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -75,6 +141,7 @@ TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim14;
 TIM_HandleTypeDef htim15;
+TIM_HandleTypeDef htim16;
 
 /* USER CODE BEGIN PV */
 key_t g_key = PWR_SW;
@@ -90,18 +157,12 @@ state_t g_state = {0};
 uint32_t g_remoteId = 0;
 
 uint8_t pwmRun = 0;
-const uint16_t freqs[FREQ_SIZE] = {
-    24600, 24800, 25000, 25200, 25400, 25200, 25000, 24800, 24600, 24400,
-    24300, 24500, 24700, 24900, 25100, 25300, 25500, 25300, 25100, 24900,
-    24700, 24500, 24300, 24500, 24700, 24900, 25100, 25300, 25500, 25600,
-    25400, 25200, 25000, 24800, 24600, 24400, 24200, 24400, 24600, 24800,
-    25000, 25200, 25400, 25600, 25800, 25600, 25400, 25200, 25000, 24800};
-const uint8_t dutys[FREQ_SIZE] = {51, 51, 50, 50, 49, 49, 50, 50, 51, 51, 52, 51, 51,
-                         50, 50, 49, 48, 49, 49, 50, 51, 51, 52, 51, 51, 50,
-                         50, 49, 48, 48, 49, 49, 50, 50, 51, 51, 52, 51, 51,
-                         50, 50, 49, 49, 48, 48, 49, 49, 50, 50, 51};
-uint16_t arrs[FREQ_SIZE] = {};   
-uint16_t ccrs[FREQ_SIZE] = {};
+uint16_t freqs[FRAME_SZ] = {},freqs2[FRAME_SZ] = {};
+
+uint16_t arrs[FRAME_SZ] = {};   
+uint16_t ccrs[FRAME_SZ] = {};
+uint16_t arrs2[FRAME_SZ] = {};   
+uint16_t ccrs2[FRAME_SZ] = {};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -113,6 +174,7 @@ static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM15_Init(void);
 static void MX_TIM14_Init(void);
+static void MX_TIM16_Init(void);
 /* USER CODE BEGIN PFP */
 void keyScan(void);
 void stopWork(void);
@@ -123,6 +185,9 @@ void recoverState();
 void pwrSwitch(uint8_t bLow);
 void offLeds();
 void onLeds();
+void genChirp(){
+
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -144,7 +209,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+    HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -165,10 +230,14 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM15_Init();
   MX_TIM14_Init();
+  MX_TIM16_Init();
   /* USER CODE BEGIN 2 */
-  for(int i = 0; i < FREQ_SIZE; i++) {
+  GenTriChirp_RandomStep(freqs, freqs2);
+  for(int i = 0; i < FRAME_SZ; i++) {
       arrs[i] = (48000000 / freqs[i]) - 1;
-      ccrs[i] = ((dutys[i]) * arrs[i]) / 100; //降低占空比会影响角度干扰效果
+      ccrs[i] = ((50) * arrs[i]) / 100; //降低占空比会影响角度干扰效果
+      arrs2[i] = (48000000 / freqs2[i]) - 1;
+      ccrs2[i] = ((50) * arrs[i]) / 100; //降低占空比会影响角度干扰效果
   }
   g_remoteId = readId();
   if(g_remoteId != 0xFFFFFFFF){
@@ -178,6 +247,8 @@ int main(void)
   HAL_TIM_Base_Start(&htim1);
   HAL_TIM_Base_Start_IT(&htim14);
   HAL_TIM_IC_Start_IT(&htim15, TIM_CHANNEL_2);
+  HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -213,6 +284,16 @@ int main(void)
     }
     bOnce = 0;
     keyScan();
+    if(bfull){
+      bfull = false;
+      GenTriChirp_RandomStep(freqs, freqs2);
+      for(int i = 0; i < FRAME_SZ; i++) {
+          arrs[i] = (48000000 / freqs[i]) - 1;
+          ccrs[i] = ((dutys[i]) * arrs[i]) / 100; //降低占空比会影响角度干扰效果
+          arrs2[i] = (48000000 / freqs2[i]) - 1;
+          ccrs2[i] = ((dutys[i]) * arrs2[i]) / 100; //降低占空比会影响角度干扰效果
+      }
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -405,10 +486,6 @@ static void MX_TIM3_Init(void)
   {
     Error_Handler();
   }
-  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
   /* USER CODE BEGIN TIM3_Init 2 */
 
   /* USER CODE END TIM3_Init 2 */
@@ -503,6 +580,68 @@ static void MX_TIM15_Init(void)
   /* USER CODE BEGIN TIM15_Init 2 */
 
   /* USER CODE END TIM15_Init 2 */
+
+}
+
+/**
+  * @brief TIM16 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM16_Init(void)
+{
+
+  /* USER CODE BEGIN TIM16_Init 0 */
+
+  /* USER CODE END TIM16_Init 0 */
+
+  TIM_OC_InitTypeDef sConfigOC = {0};
+  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
+
+  /* USER CODE BEGIN TIM16_Init 1 */
+
+  /* USER CODE END TIM16_Init 1 */
+  htim16.Instance = TIM16;
+  htim16.Init.Prescaler = 0;
+  htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim16.Init.Period = 1427;
+  htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim16.Init.RepetitionCounter = 0;
+  htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim16) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim16) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 713;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+  if (HAL_TIM_PWM_ConfigChannel(&htim16, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
+  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
+  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+  sBreakDeadTimeConfig.DeadTime = 0;
+  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
+  if (HAL_TIMEx_ConfigBreakDeadTime(&htim16, &sBreakDeadTimeConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM16_Init 2 */
+
+  /* USER CODE END TIM16_Init 2 */
+  HAL_TIM_MspPostInit(&htim16);
 
 }
 
@@ -802,18 +941,27 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
   switch ((uint32_t)htim->Instance)
   {
   case (uint32_t)TIM3:
-    static uint16_t period = 1919;
-    static uint16_t pulseWidth = 950;
-    static uint8_t cnt;
+    static uint16_t period = 1919,period2 = 1919;
+    static uint16_t pulseWidth = 950,pulseWidth2 = 950;
+    static uint32_t cnt;
     static uint8_t idx;
     if (++cnt >= 8) {
       cnt = 0;
-      pulseWidth = ccrs[idx % FREQ_SIZE];
-      period = arrs[idx++ % FREQ_SIZE];
+      pulseWidth = ccrs[idx % FRAME_SZ];
+      period = arrs[idx % FRAME_SZ];
+
+      pulseWidth2 = ccrs2[idx % FRAME_SZ];
+      period2 = arrs2[idx++ % FRAME_SZ];
+
+      TIM3->ARR = period;
+      TIM3->CCR1 = pulseWidth;
+      TIM16->ARR = period2;
+      TIM16->CCR1 = pulseWidth2;
+      if(idx >= FRAME_SZ) {
+        idx = 0;
+        bfull = true;
+      }
     }
-    TIM3->ARR = period;
-    TIM3->CCR1 = pulseWidth;
-    TIM3->CCR2 = pulseWidth;
     break;
   case (uint32_t)TIM14:
     sysTickCnt++;
@@ -990,18 +1138,22 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
 
 void stopWork(void)
 {
+  HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
+  HAL_TIM_Base_Stop_IT(&htim16);
   HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
   HAL_TIM_Base_Stop_IT(&htim3);
 
   GPIO_InitTypeDef pwmInit = {0};
-  pwmInit.Pin = PWM1_Pin | PWM2_Pin;
+  pwmInit.Pin = PWM1_Pin;
   pwmInit.Mode = GPIO_MODE_OUTPUT_PP;
   pwmInit.Pull = GPIO_NOPULL;
   pwmInit.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(PWM1_GPIO_Port, &pwmInit);
+  pwmInit.Pin = PWM2_Pin;
+  HAL_GPIO_Init(PWM2_GPIO_Port, &pwmInit);
 
-  HAL_GPIO_WritePin(PWM1_GPIO_Port, PWM1_Pin | PWM2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(PWM1_GPIO_Port, PWM1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(PWM2_GPIO_Port, PWM2_Pin, GPIO_PIN_RESET);
   pwmRun = 0;
 }
 
@@ -1009,8 +1161,11 @@ void startWork(void)
 {
   HAL_TIM_MspPostInit(&htim3);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
   HAL_TIM_Base_Start_IT(&htim3);
+
+  HAL_TIM_MspPostInit(&htim16);
+  HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
+  HAL_TIM_Base_Start_IT(&htim16);
   pwmRun = 1;
 }
 
