@@ -26,12 +26,17 @@
 #include <stdbool.h>
 
 #define Fc          33000U    // 中心频率 33kHz
-#define MAX_DF      500     // 拍频最大 1000Hz
-#define FRAME_SZ    50U       // 帧长度50点
+#define MAX_DF      500    // 拍频最大 1000Hz
+#define FRAME_SZ    50       // 帧长度50点
 #define STEP_MIN    20     // 最小步长
-#define STEP_MAX    26      // 最大步长
+#define STEP_MAX    30  // 最大步长
+#define BASE_DF     30     // 拍频基准 150Hz
 
 static uint16_t PN_seed = 0xA5A5;
+uint16_t arrs[FRAME_SZ] = {};   
+uint16_t ccrs[FRAME_SZ] = {};
+uint16_t arrs2[FRAME_SZ] = {};   
+uint16_t ccrs2[FRAME_SZ] = {};
 
 // LFSR 16bit伪随机序列
 static uint16_t LFSR_Next(uint16_t *seed)
@@ -47,21 +52,16 @@ static uint16_t LFSR_Next(uint16_t *seed)
  * @param bufB 输出通道2频率数组
  */
 uint8_t dutys[FRAME_SZ] = {};
-void GenTriChirp_RandomStep(uint16_t bufA[FRAME_SZ], uint16_t bufB[FRAME_SZ])
+void GenTriChirp_RandomStep()
 {
     uint8_t i;
-    int16_t df = 0;
+    int16_t df = BASE_DF;
     bool dir_up = true; // true=拍频上升；false=拍频下降
-    // 获取随机步长：100 ~ 200
     uint16_t rnd_val = LFSR_Next(&PN_seed);
     uint16_t step = STEP_MIN + (rnd_val % (STEP_MAX - STEP_MIN + 1));
 
     for(i = 0; i < FRAME_SZ; i++)
     {
-        // if (rnd_val & 0x0008) {
-        //     step += (rnd_val & 0x0003); // 附加微调
-        // }
-
         if(dir_up)
         {
             df += step;
@@ -74,17 +74,18 @@ void GenTriChirp_RandomStep(uint16_t bufA[FRAME_SZ], uint16_t bufB[FRAME_SZ])
         else
         {
             df -= step;
-            if(df <= 0)
+            if(df <= BASE_DF)
             {
-                df = 0;
+                df = BASE_DF;
                 dir_up = true; // 低于下限，切换为上升
             }
         }
 
-        // 对称生成两路载波，中心33000
-        bufA[i] = Fc - (df / 2U);
-        bufB[i] = Fc + (df / 2U);
-        dutys[i] = 45 + (LFSR_Next(&PN_seed) % 20);
+        // 对称生成两路载波，中心33000  (48000000 / freqs[i]) - 1;
+        arrs[i] = (48000000 / (Fc - (df / 2U))) - 1;
+        ccrs[i] = ((50) * arrs[i]) / 100; //降低占空比会影响角度干扰效果
+        arrs2[i] = (48000000 / (Fc + (df / 2U))) - 1;
+        ccrs2[i] = ((50) * arrs2[i]) / 100; //降低占空比会影响角度干扰效果
     }
 }
 
@@ -157,12 +158,8 @@ state_t g_state = {0};
 uint32_t g_remoteId = 0;
 
 uint8_t pwmRun = 0;
-uint16_t freqs[FRAME_SZ] = {},freqs2[FRAME_SZ] = {};
 
-uint16_t arrs[FRAME_SZ] = {};   
-uint16_t ccrs[FRAME_SZ] = {};
-uint16_t arrs2[FRAME_SZ] = {};   
-uint16_t ccrs2[FRAME_SZ] = {};
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -232,13 +229,7 @@ int main(void)
   MX_TIM14_Init();
   MX_TIM16_Init();
   /* USER CODE BEGIN 2 */
-  GenTriChirp_RandomStep(freqs, freqs2);
-  for(int i = 0; i < FRAME_SZ; i++) {
-      arrs[i] = (48000000 / freqs[i]) - 1;
-      ccrs[i] = ((50) * arrs[i]) / 100; //降低占空比会影响角度干扰效果
-      arrs2[i] = (48000000 / freqs2[i]) - 1;
-      ccrs2[i] = ((50) * arrs[i]) / 100; //降低占空比会影响角度干扰效果
-  }
+  GenTriChirp_RandomStep();
   g_remoteId = readId();
   if(g_remoteId != 0xFFFFFFFF){
     g_paired = 1;
@@ -285,14 +276,8 @@ int main(void)
     bOnce = 0;
     keyScan();
     if(bfull){
-      bfull = false;
-      GenTriChirp_RandomStep(freqs, freqs2);
-      for(int i = 0; i < FRAME_SZ; i++) {
-          arrs[i] = (48000000 / freqs[i]) - 1;
-          ccrs[i] = ((dutys[i]) * arrs[i]) / 100; //降低占空比会影响角度干扰效果
-          arrs2[i] = (48000000 / freqs2[i]) - 1;
-          ccrs2[i] = ((dutys[i]) * arrs2[i]) / 100; //降低占空比会影响角度干扰效果
-      }
+      bfull = 0;
+      GenTriChirp_RandomStep();
     }
     /* USER CODE END WHILE */
 
@@ -970,7 +955,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
       led_cnt = 0;
       if(pwrlow && pwrOn) {
         static uint8_t off;
-        if(off++ > 8) {
+        if(off++ > 80000) {
           off = 0;
           HAL_GPIO_WritePin(PWR_ON_GPIO_Port, PWR_ON_Pin, GPIO_PIN_RESET);
         }
