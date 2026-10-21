@@ -25,12 +25,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define Fc          33000U    // 中心频率 33kHz
-#define MAX_DF      500    // 拍频最大 1000Hz
-#define FRAME_SZ    50       // 帧长度50点
+#define Fc          25000U    // 中心频率 33kHz
+#define MAX_DF      300    // 拍频最大 1000Hz
+#define FRAME_SZ    30       // 帧长度50点
 #define STEP_MIN    20     // 最小步长
-#define STEP_MAX    30  // 最大步长
-#define BASE_DF     30     // 拍频基准 150Hz
+#define STEP_MAX    20  // 最大步长
+#define BASE_DF     0     // 拍频基准 150Hz
+#define DUTY_ADJ    1
 
 static uint16_t PN_seed = 0xA5A5;
 uint16_t arrs[FRAME_SZ] = {};   
@@ -83,9 +84,9 @@ void GenTriChirp_RandomStep()
 
         // 对称生成两路载波，中心33000  (48000000 / freqs[i]) - 1;
         arrs[i] = (48000000 / (Fc - (df / 2U))) - 1;
-        ccrs[i] = ((50) * arrs[i]) / 100; //降低占空比会影响角度干扰效果
+        ccrs[i] = ((50) * arrs[i]) / 100 + i * DUTY_ADJ; //降低占空比会影响角度干扰效果
         arrs2[i] = (48000000 / (Fc + (df / 2U))) - 1;
-        ccrs2[i] = ((50) * arrs2[i]) / 100; //降低占空比会影响角度干扰效果
+        ccrs2[i] = ((50) * arrs2[i]) / 100 - i * DUTY_ADJ; //降低占空比会影响角度干扰效果
     }
 }
 
