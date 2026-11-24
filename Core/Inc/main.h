@@ -67,6 +67,8 @@ void Error_Handler(void);
 #define VCC_ADC_GPIO_Port GPIOA
 #define PWM3_Pin GPIO_PIN_6
 #define PWM3_GPIO_Port GPIOA
+#define PWM_SW_Pin GPIO_PIN_7
+#define PWM_SW_GPIO_Port GPIOA
 #define HIGH_LED_Pin GPIO_PIN_12
 #define HIGH_LED_GPIO_Port GPIOB
 #define PWR_LOW_LED_Pin GPIO_PIN_13
