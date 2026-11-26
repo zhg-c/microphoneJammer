@@ -1005,6 +1005,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
 
 void stopWork(void) {
   HAL_GPIO_WritePin(PWM_SW_GPIO_Port, PWM_SW_Pin, GPIO_PIN_RESET);
+  HAL_Delay(100);
   HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_4);
   HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
   HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
@@ -1018,6 +1019,7 @@ void startWork(void) {
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
   HAL_TIM_MspPostInit(&htim16);
   HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
+  HAL_Delay(100);
   HAL_GPIO_WritePin(PWM_SW_GPIO_Port, PWM_SW_Pin, GPIO_PIN_SET);
   pwmRun = 1;
 }
